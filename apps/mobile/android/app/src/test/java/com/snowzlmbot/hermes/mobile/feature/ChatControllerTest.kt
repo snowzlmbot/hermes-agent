@@ -21,7 +21,7 @@ class ChatControllerTest {
   @Test
   fun connectsLoadsSessionsAndKeepsStoredAndRuntimeIdentitiesSeparate() = runTest {
     val runtime = RecordingRuntime()
-    val controller = ChatController(runtime, this)
+    val controller = ChatController(runtime, backgroundScope)
 
     controller.connect()
     controller.openSession("stored-1")
@@ -35,7 +35,7 @@ class ChatControllerTest {
   @Test
   fun sendStopAndEventsUseTheActiveRuntimeIdentity() = runTest {
     val runtime = RecordingRuntime()
-    val controller = ChatController(runtime, this)
+    val controller = ChatController(runtime, backgroundScope)
     controller.connect()
     controller.newSession()
 
@@ -71,7 +71,7 @@ class ChatControllerTest {
   @Test
   fun failedOperationsSetRecoverableUiErrorWithoutDiscardingSessions() = runTest {
     val runtime = RecordingRuntime().apply { failPrompts = true }
-    val controller = ChatController(runtime, this)
+    val controller = ChatController(runtime, backgroundScope)
     controller.connect()
     controller.newSession()
 
