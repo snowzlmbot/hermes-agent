@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "Hermes";
+"NSLocalNetworkUsageDescription" = "Hermes 会连接到你在本地网络中选择的网关。";
+"NSMicrophoneUsageDescription" = "录制语音消息时，Hermes 需要使用麦克风。";
+"NSPhotoLibraryUsageDescription" = "Hermes 允许你选择照片并附加到对话中。";

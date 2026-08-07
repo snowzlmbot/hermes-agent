@@ -1,0 +1,4 @@
+"CFBundleDisplayName" = "Hermes";
+"NSLocalNetworkUsageDescription" = "Hermes connects to the gateway you choose on your local network.";
+"NSMicrophoneUsageDescription" = "Hermes uses the microphone when you record a voice message.";
+"NSPhotoLibraryUsageDescription" = "Hermes lets you choose photos to attach to a conversation.";
