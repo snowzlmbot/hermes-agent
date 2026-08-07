@@ -110,7 +110,7 @@ class NativePkce private constructor(
       val query = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
         val split = part.split('=', limit = 2)
         split.firstOrNull()?.takeIf(String::isNotEmpty)?.let { name ->
-          name to java.net.URLDecoder.decode(split.getOrElse(1) { "" }, Charsets.UTF_8)
+          name to java.net.URLDecoder.decode(split.getOrElse(1) { "" }, Charsets.UTF_8.name())
         }
       }.toMap()
       query["error"]?.let { error ->
