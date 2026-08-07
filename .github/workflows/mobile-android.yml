@@ -1,4 +1,4 @@
-name: Mobile Android Unit Tests
+name: Mobile Android
 
 on:
   workflow_dispatch:
@@ -13,14 +13,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: mobile-android-unit-${{ github.ref }}
+  group: mobile-android-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  unit:
-    name: Android unit contract
+  verify:
+    name: Android test, lint, and debug APK
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -38,13 +38,20 @@ jobs:
       - name: Run unit tests
         working-directory: apps/mobile/android
         run: ./gradlew --no-daemon --console=plain testDebugUnitTest
-      - name: Upload test reports
+      - name: Run Android lint
+        working-directory: apps/mobile/android
+        run: ./gradlew --no-daemon --console=plain lintDebug
+      - name: Assemble debug APK
+        working-directory: apps/mobile/android
+        run: ./gradlew --no-daemon --console=plain assembleDebug
+      - name: Upload APK and reports
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
-          name: hermes-mobile-android-unit-${{ github.sha }}
+          name: hermes-mobile-android-${{ github.sha }}
           path: |
+            apps/mobile/android/app/build/outputs/apk/debug/*.apk
             apps/mobile/android/app/build/test-results/testDebugUnitTest/**
-            apps/mobile/android/app/build/reports/tests/testDebugUnitTest/**
+            apps/mobile/android/app/build/reports/**
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
