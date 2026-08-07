@@ -28,7 +28,7 @@ data class GatewayStatus(
   val loginStrategy: GatewayLoginStrategy
     get() = when {
       !authRequired -> GatewayLoginStrategy.STATIC_TOKEN
-      "native_pkce" in authFlows -> GatewayLoginStrategy.NATIVE_OAUTH
+      "native_pkce_mobile" in authFlows -> GatewayLoginStrategy.NATIVE_OAUTH
       else -> GatewayLoginStrategy.UNSUPPORTED_INTERACTIVE
     }
 
@@ -66,6 +66,8 @@ class NativePkce private constructor(
     private val random = SecureRandom()
     private val encoder = Base64.getUrlEncoder().withoutPadding()
 
+    val MOBILE_REDIRECT_URI: URI = URI("com.snowzlmbot.hermes.mobile:/oauth/callback")
+
     fun create(): NativePkce = create(
       verifierBytes = ByteArray(32).also(random::nextBytes),
       stateBytes = ByteArray(24).also(random::nextBytes),
@@ -88,7 +90,7 @@ class NativePkce private constructor(
       state: String,
       provider: String? = null,
     ): HttpUrl {
-      validateLoopbackRedirect(redirectUri)
+      validateMobileRedirect(redirectUri)
       if (challenge.isBlank()) throw NativeAuthException("PKCE challenge is required")
       if (state.isBlank()) throw NativeAuthException("OAuth state is required")
       return endpoint.httpBaseUrl.newBuilder()
@@ -104,6 +106,7 @@ class NativePkce private constructor(
     }
 
     fun parseCallback(uri: URI, expectedState: String): String {
+      validateMobileRedirect(uri)
       val query = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
         val split = part.split('=', limit = 2)
         split.firstOrNull()?.takeIf(String::isNotEmpty)?.let { name ->
@@ -123,9 +126,14 @@ class NativePkce private constructor(
       return code
     }
 
-    private fun validateLoopbackRedirect(uri: URI) {
-      if (uri.scheme != "http" || uri.host !in setOf("127.0.0.1", "::1")) {
-        throw NativeAuthException("Native OAuth redirect must use a loopback IP address")
+    private fun validateMobileRedirect(uri: URI) {
+      if (
+        uri.scheme != MOBILE_REDIRECT_URI.scheme ||
+        uri.path != MOBILE_REDIRECT_URI.path ||
+        uri.rawAuthority != null ||
+        uri.fragment != null
+      ) {
+        throw NativeAuthException("Native OAuth redirect is not registered for this application")
       }
     }
   }

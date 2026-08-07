@@ -18,18 +18,24 @@ class ProtocolException(message: String) : IllegalArgumentException(message)
 enum class GatewayEventType {
   GATEWAY_READY,
   SESSION_INFO,
+  SESSION_TITLE,
   MESSAGE_START,
   MESSAGE_DELTA,
   MESSAGE_INTERIM,
   MESSAGE_COMPLETE,
   REASONING_DELTA,
+  THINKING_DELTA,
+  STATUS_UPDATE,
   TOOL_START,
   TOOL_PROGRESS,
   TOOL_COMPLETE,
   APPROVAL_REQUEST,
   CLARIFY_REQUEST,
+  CLARIFY_EXPIRE,
   SECRET_REQUEST,
+  SECRET_EXPIRE,
   SUDO_REQUEST,
+  SUDO_EXPIRE,
   ERROR,
   SESSIONS_CHANGED,
   UNKNOWN,
@@ -39,18 +45,24 @@ enum class GatewayEventType {
     fun fromWire(value: String): GatewayEventType = when (value) {
       "gateway.ready" -> GATEWAY_READY
       "session.info" -> SESSION_INFO
+      "session.title" -> SESSION_TITLE
       "message.start" -> MESSAGE_START
       "message.delta" -> MESSAGE_DELTA
       "message.interim" -> MESSAGE_INTERIM
       "message.complete" -> MESSAGE_COMPLETE
       "reasoning.delta" -> REASONING_DELTA
+      "thinking.delta" -> THINKING_DELTA
+      "status.update" -> STATUS_UPDATE
       "tool.start" -> TOOL_START
       "tool.progress" -> TOOL_PROGRESS
       "tool.complete" -> TOOL_COMPLETE
       "approval.request" -> APPROVAL_REQUEST
       "clarify.request" -> CLARIFY_REQUEST
+      "clarify.expire" -> CLARIFY_EXPIRE
       "secret.request" -> SECRET_REQUEST
+      "secret.expire" -> SECRET_EXPIRE
       "sudo.request" -> SUDO_REQUEST
+      "sudo.expire" -> SUDO_EXPIRE
       "error" -> ERROR
       "sessions.changed" -> SESSIONS_CHANGED
       else -> UNKNOWN

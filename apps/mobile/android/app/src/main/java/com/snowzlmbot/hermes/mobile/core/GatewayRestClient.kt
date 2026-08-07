@@ -38,6 +38,12 @@ data class SynthesizedAudio(
   val provider: String,
 )
 
+data class SessionUpdateResult(
+  val title: String,
+  val archived: Boolean,
+  val pinned: Boolean,
+)
+
 class GatewayRestClient(
   private val endpoint: GatewayEndpoint,
   private val credential: RestCredential? = null,
@@ -59,6 +65,64 @@ class GatewayRestClient(
     val result = postJson("api/auth/ws-ticket", buildJsonObject {}, authenticate = true)
     return result.string("ticket")?.takeIf(String::isNotBlank)?.let(::SecretValue)
       ?: throw ProtocolException("Gateway did not return a WebSocket ticket")
+  }
+
+  suspend fun listSessions(includeArchived: Boolean = false): List<SessionSummary> {
+    val url = endpoint.httpBaseUrl.newBuilder()
+      .addPathSegments("api/sessions")
+      .addQueryParameter("order", "recent")
+      .addQueryParameter("archived", if (includeArchived) "include" else "exclude")
+      .build()
+    val body = execute(
+      Request.Builder()
+        .url(url)
+        .get()
+        .apply { applyCredential() }
+        .build(),
+    )
+    return GatewayProtocol.parseSessionList(parseObject(body))
+  }
+
+  suspend fun updateSession(
+    storedId: String,
+    title: String? = null,
+    archived: Boolean? = null,
+    pinned: Boolean? = null,
+  ): SessionUpdateResult {
+    val cleanId = storedId.trim()
+    require(cleanId.isNotEmpty()) { "Stored session id is required" }
+    require(title != null || archived != null || pinned != null) { "At least one update is required" }
+    val body = buildJsonObject {
+      title?.trim()?.let { put("title", it) }
+      archived?.let { put("archived", it) }
+      pinned?.let { put("pinned", it) }
+    }
+    val result = parseObject(
+      execute(
+        Request.Builder()
+          .url(sessionUrl(cleanId))
+          .patch(body.toString().toRequestBody(JSON_MEDIA_TYPE))
+          .apply { applyCredential() }
+          .build(),
+      ),
+    )
+    return SessionUpdateResult(
+      title = result.string("title").orEmpty(),
+      archived = result.boolean("archived") ?: archived ?: false,
+      pinned = result.boolean("pinned") ?: pinned ?: false,
+    )
+  }
+
+  suspend fun deleteSession(storedId: String) {
+    val cleanId = storedId.trim()
+    require(cleanId.isNotEmpty()) { "Stored session id is required" }
+    execute(
+      Request.Builder()
+        .url(sessionUrl(cleanId))
+        .delete()
+        .apply { applyCredential() }
+        .build(),
+    )
   }
 
   suspend fun exchangeNativeCode(code: String, verifier: String): OAuthTokenSet {
@@ -144,6 +208,11 @@ class GatewayRestClient(
       null -> Unit
     }
   }
+
+  private fun sessionUrl(storedId: String) = endpoint.httpBaseUrl.newBuilder()
+    .addPathSegments("api/sessions")
+    .addPathSegment(storedId)
+    .build()
 
   private suspend fun execute(request: Request): String = withContext(Dispatchers.IO) {
     httpClient.newCall(request).execute().use { response ->
