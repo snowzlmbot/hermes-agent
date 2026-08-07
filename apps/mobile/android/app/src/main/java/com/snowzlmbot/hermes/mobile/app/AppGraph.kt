@@ -31,7 +31,10 @@ internal class AppGraph(
       GatewayAuthMode.TICKET -> null
     }
     val rest = GatewayRestClient(endpoint, restCredential)
-    val socket = GatewaySocketClient(endpoint) { connection.credential() }
+    val socket = GatewaySocketClient(
+      endpoint = endpoint,
+      credentialProvider = { connection.credential() },
+    )
     return HermesMobileRuntime(socket, RestMobileSessionSource(rest))
   }
 }

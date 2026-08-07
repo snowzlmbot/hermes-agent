@@ -208,6 +208,15 @@ internal class ChatController(
     runtime.close()
   }
 
+  private suspend fun runOperation(operation: suspend () -> Unit) {
+    try {
+      operation()
+      mutableState.value = mutableState.value.copy(error = null)
+    } catch (error: Throwable) {
+      mutableState.value = mutableState.value.copy(error = error.toUiError())
+    }
+  }
+
   private fun ActiveSession.toChatState(): ChatState = ChatState(
     runtimeSessionId = runtimeId,
     storedSessionId = storedId,
