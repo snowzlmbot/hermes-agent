@@ -146,8 +146,8 @@ private actor TestSocket: GatewaySocket {
         }
     }
 
-    func fail() {
-        cancel()
+    func fail() async {
+        await cancel()
     }
 
     private func fulfillRequestWaiters() {

@@ -1,5 +1,6 @@
 import XCTest
 
+@MainActor
 final class HermesMobileUITests: XCTestCase {
     func testSetupScreenExposesAccessibleConnectionControls() {
         let app = XCUIApplication()
