@@ -7,8 +7,8 @@ import com.snowzlmbot.hermes.mobile.core.GatewayEventType
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -60,7 +60,7 @@ class ChatControllerTest {
         },
       ),
     )
-    advanceUntilIdle()
+    runCurrent()
 
     assertEquals(listOf("runtime-new" to "hello"), runtime.prompts)
     assertEquals(listOf("runtime-new"), runtime.interrupted)
