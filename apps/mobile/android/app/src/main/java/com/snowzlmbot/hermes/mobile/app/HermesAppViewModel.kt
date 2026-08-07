@@ -151,7 +151,6 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
 
   override fun onCleared() {
     controller?.close()
-    super.onCleared()
   }
 
   private suspend fun restore() {
