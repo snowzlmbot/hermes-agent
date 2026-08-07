@@ -1,0 +1,50 @@
+name: Mobile Android Unit Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hermes-agent-Mobile-app
+    paths:
+      - apps/mobile/android/**
+      - .github/workflows/mobile-android.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-android-unit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Android unit contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@4d9f0ba0025fe599b4ebab900eb7f3a1d93ef4c2 # v5.0.2
+      - name: Set up Java
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.1.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@4d9f0ba0025fe599b4ebab900eb7f3a1d93ef4c2 # v5.0.2
+      - name: Run unit tests
+        working-directory: apps/mobile/android
+        run: ./gradlew --no-daemon --console=plain testDebugUnitTest
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: hermes-mobile-android-unit-${{ github.sha }}
+          path: |
+            apps/mobile/android/app/build/test-results/testDebugUnitTest/**
+            apps/mobile/android/app/build/reports/tests/testDebugUnitTest/**
+          if-no-files-found: warn
+          retention-days: 7
