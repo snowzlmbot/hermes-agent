@@ -15,8 +15,8 @@ class AttachmentPayloadTest {
 
     assertEquals("image.attach_bytes", image.method)
     assertEquals("pdf.attach", pdf.method)
-    assertTrue(image.params["content_base64"]?.toString()?.isNotBlank() == true)
-    assertTrue(pdf.params["content_base64"]?.toString()?.isNotBlank() == true)
+    assertTrue(image.params["content_base64"]?.isNotBlank() == true)
+    assertTrue(pdf.params["content_base64"]?.isNotBlank() == true)
     assertFalse(image.params.containsKey("data_url"))
     assertFalse(pdf.params.containsKey("data_url"))
   }
@@ -26,7 +26,7 @@ class AttachmentPayloadTest {
     val file = AttachmentPayload.file("notes.txt", "text/plain", "hello".toByteArray())
 
     assertEquals("file.attach", file.method)
-    assertTrue(file.params["data_url"]?.toString()?.contains("data:text/plain;base64,") == true)
+    assertTrue(file.params["data_url"]?.contains("data:text/plain;base64,") == true)
     assertFalse(file.params.containsKey("content_base64"))
     assertEquals("@file:.hermes/desktop-attachments/notes.txt", AttachmentResult.referenceFrom(
       Json.parseToJsonElement("""{"ref_text":"@file:.hermes/desktop-attachments/notes.txt"}"""),
