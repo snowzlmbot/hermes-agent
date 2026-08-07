@@ -2,6 +2,7 @@ package com.snowzlmbot.hermes.mobile.feature
 
 import com.snowzlmbot.hermes.mobile.core.GatewayEvent
 import com.snowzlmbot.hermes.mobile.core.GatewayEventType
+import com.snowzlmbot.hermes.mobile.core.MessageRole
 import kotlinx.serialization.json.JsonObject
 
 internal enum class MessageStatus {
@@ -23,6 +24,7 @@ internal enum class MessageStatus {
 internal data class ChatMessage(
   val id: String,
   val text: String,
+  val role: MessageRole = MessageRole.ASSISTANT,
   val reasoning: String = "",
   val status: MessageStatus = MessageStatus.STREAMING,
   val error: String? = null,
