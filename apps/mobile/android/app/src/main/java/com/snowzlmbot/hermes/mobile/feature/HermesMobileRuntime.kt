@@ -13,6 +13,19 @@ import kotlinx.serialization.json.put
 
 internal interface MobileSessionSource {
   suspend fun listSessions(): List<SessionSummary>
+
+  suspend fun updateSession(
+    storedId: String,
+    title: String?,
+    archived: Boolean?,
+    pinned: Boolean?,
+  ) {
+    error("Session updates are unavailable")
+  }
+
+  suspend fun deleteSession(storedId: String) {
+    error("Session deletion is unavailable")
+  }
 }
 
 internal class RestMobileSessionSource(
@@ -20,6 +33,19 @@ internal class RestMobileSessionSource(
 ) : MobileSessionSource {
   override suspend fun listSessions(): List<SessionSummary> =
     client.listSessions(includeArchived = false)
+
+  override suspend fun updateSession(
+    storedId: String,
+    title: String?,
+    archived: Boolean?,
+    pinned: Boolean?,
+  ) {
+    client.updateSession(storedId, title, archived, pinned)
+  }
+
+  override suspend fun deleteSession(storedId: String) {
+    client.deleteSession(storedId)
+  }
 }
 
 internal class HermesMobileRuntime(
@@ -73,7 +99,7 @@ internal class HermesMobileRuntime(
     rpc.request("session.interrupt", runtimeParams(runtimeId))
   }
 
-  suspend fun respondApproval(runtimeId: String, choice: String) {
+  override suspend fun respondApproval(runtimeId: String, choice: String) {
     rpc.request(
       "approval.respond",
       buildJsonObject {
@@ -83,19 +109,19 @@ internal class HermesMobileRuntime(
     )
   }
 
-  suspend fun respondClarify(runtimeId: String, requestId: String, answer: String) {
+  override suspend fun respondClarify(runtimeId: String, requestId: String, answer: String) {
     rpc.request("clarify.respond", responseParams(runtimeId, requestId, "answer", answer))
   }
 
-  suspend fun respondSecret(runtimeId: String, requestId: String, value: String) {
+  override suspend fun respondSecret(runtimeId: String, requestId: String, value: String) {
     rpc.request("secret.respond", responseParams(runtimeId, requestId, "value", value))
   }
 
-  suspend fun respondSudo(runtimeId: String, requestId: String, password: String) {
+  override suspend fun respondSudo(runtimeId: String, requestId: String, password: String) {
     rpc.request("sudo.respond", responseParams(runtimeId, requestId, "password", password))
   }
 
-  suspend fun attach(
+  override suspend fun attach(
     runtimeId: String,
     method: String,
     params: Map<String, String>,
@@ -109,6 +135,19 @@ internal class HermesMobileRuntime(
       },
     )
     return (result["ref_text"] as? JsonPrimitive)?.content
+  }
+
+  override suspend fun updateSession(
+    storedId: String,
+    title: String?,
+    archived: Boolean?,
+    pinned: Boolean?,
+  ) {
+    sessions.updateSession(storedId, title, archived, pinned)
+  }
+
+  override suspend fun deleteSession(storedId: String) {
+    sessions.deleteSession(storedId)
   }
 
   override fun close() = rpc.close()

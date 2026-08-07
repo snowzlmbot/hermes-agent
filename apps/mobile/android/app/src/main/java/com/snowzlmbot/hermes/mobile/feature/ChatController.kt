@@ -41,6 +41,40 @@ internal interface MobileGatewayRuntime {
   suspend fun resumeSession(storedId: String): ActiveSession
   suspend fun submitPrompt(runtimeId: String, text: String)
   suspend fun interrupt(runtimeId: String)
+
+  suspend fun respondApproval(runtimeId: String, choice: String) {
+    error("Approval responses are unavailable")
+  }
+
+  suspend fun respondClarify(runtimeId: String, requestId: String, answer: String) {
+    error("Clarify responses are unavailable")
+  }
+
+  suspend fun respondSecret(runtimeId: String, requestId: String, value: String) {
+    error("Secret responses are unavailable")
+  }
+
+  suspend fun respondSudo(runtimeId: String, requestId: String, password: String) {
+    error("Sudo responses are unavailable")
+  }
+
+  suspend fun attach(runtimeId: String, method: String, params: Map<String, String>): String? {
+    error("Attachments are unavailable")
+  }
+
+  suspend fun updateSession(
+    storedId: String,
+    title: String? = null,
+    archived: Boolean? = null,
+    pinned: Boolean? = null,
+  ) {
+    error("Session updates are unavailable")
+  }
+
+  suspend fun deleteSession(storedId: String) {
+    error("Session deletion is unavailable")
+  }
+
   fun close()
 }
 
@@ -120,6 +154,49 @@ internal class ChatController(
     } catch (error: Throwable) {
       mutableState.value = mutableState.value.copy(error = error.toUiError())
     }
+  }
+
+  suspend fun respondApproval(choice: String) {
+    val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
+    runOperation { runtime.respondApproval(runtimeId, choice) }
+  }
+
+  suspend fun respondClarify(requestId: String, answer: String) {
+    val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
+    runOperation { runtime.respondClarify(runtimeId, requestId, answer) }
+  }
+
+  suspend fun respondSecret(requestId: String, value: String) {
+    val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
+    runOperation { runtime.respondSecret(runtimeId, requestId, value) }
+  }
+
+  suspend fun respondSudo(requestId: String, password: String) {
+    val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
+    runOperation { runtime.respondSudo(runtimeId, requestId, password) }
+  }
+
+  suspend fun attach(method: String, params: Map<String, String>): String? {
+    val runtimeId = mutableState.value.chat.runtimeSessionId ?: return null
+    var reference: String? = null
+    runOperation { reference = runtime.attach(runtimeId, method, params) }
+    return reference
+  }
+
+  suspend fun updateSession(
+    storedId: String,
+    title: String? = null,
+    archived: Boolean? = null,
+    pinned: Boolean? = null,
+  ) {
+    runOperation { runtime.updateSession(storedId, title, archived, pinned) }
+    refreshSessions()
+  }
+
+  suspend fun deleteSession(storedId: String) {
+    runOperation { runtime.deleteSession(storedId) }
+    refreshSessions()
+    if (mutableState.value.chat.storedSessionId == storedId) newSession()
   }
 
   fun clearError() {

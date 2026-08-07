@@ -1,0 +1,37 @@
+package com.snowzlmbot.hermes.mobile.app
+
+import com.snowzlmbot.hermes.mobile.core.GatewayAuthMode
+import com.snowzlmbot.hermes.mobile.core.GatewayConnection
+import com.snowzlmbot.hermes.mobile.core.GatewayProfile
+import com.snowzlmbot.hermes.mobile.core.GatewayProfileRepository
+import com.snowzlmbot.hermes.mobile.core.GatewayRestClient
+import com.snowzlmbot.hermes.mobile.core.GatewaySocketClient
+import com.snowzlmbot.hermes.mobile.core.RestCredential
+import com.snowzlmbot.hermes.mobile.core.SecretValue
+import com.snowzlmbot.hermes.mobile.feature.HermesMobileRuntime
+import com.snowzlmbot.hermes.mobile.feature.RestMobileSessionSource
+
+internal class AppGraph(
+  private val connections: GatewayProfileRepository,
+) {
+  suspend fun restoreConnection(): GatewayConnection? = connections.load()
+
+  suspend fun saveConnection(profile: GatewayProfile, secret: SecretValue) {
+    connections.save(profile, secret)
+  }
+
+  suspend fun clearConnection() {
+    connections.clear()
+  }
+
+  fun runtime(connection: GatewayConnection): HermesMobileRuntime {
+    val endpoint = connection.endpoint()
+    val restCredential = when (connection.profile.authMode) {
+      GatewayAuthMode.TOKEN -> RestCredential.StaticToken(connection.secret)
+      GatewayAuthMode.TICKET -> null
+    }
+    val rest = GatewayRestClient(endpoint, restCredential)
+    val socket = GatewaySocketClient(endpoint) { connection.credential() }
+    return HermesMobileRuntime(socket, RestMobileSessionSource(rest))
+  }
+}
