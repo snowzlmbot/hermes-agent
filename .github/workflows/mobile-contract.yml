@@ -1,0 +1,32 @@
+name: Mobile Protocol Contract
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hermes-agent-Mobile-app
+    paths:
+      - apps/mobile/protocol/**
+      - apps/mobile/test-server/**
+      - apps/mobile/scripts/**
+      - .github/workflows/mobile-contract.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Shared mobile protocol contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Verify contract fixture
+        run: bash apps/mobile/scripts/verify.sh --contract-only

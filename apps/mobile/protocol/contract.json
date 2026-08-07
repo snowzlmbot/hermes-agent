@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "auth": {
+    "rest_headers": ["X-Hermes-Session-Token", "Authorization"],
+    "websocket_query_modes": ["token", "ticket"]
+  },
+  "rpc_methods": [
+    "session.list",
+    "session.create",
+    "session.resume",
+    "session.title",
+    "session.delete",
+    "session.interrupt",
+    "prompt.submit",
+    "model.options",
+    "approval.respond",
+    "clarify.respond",
+    "image.attach_bytes",
+    "pdf.attach",
+    "file.attach"
+  ],
+  "event_types": [
+    "gateway.ready",
+    "session.info",
+    "message.start",
+    "message.delta",
+    "message.interim",
+    "message.complete",
+    "reasoning.delta",
+    "tool.start",
+    "tool.progress",
+    "tool.complete",
+    "approval.request",
+    "clarify.request",
+    "error",
+    "sessions.changed"
+  ],
+  "frames": {
+    "request": {
+      "jsonrpc": "2.0",
+      "id": "mobile-1",
+      "method": "session.create",
+      "params": {
+        "source": "mobile",
+        "profile": "default",
+        "cols": 80
+      }
+    },
+    "success": {
+      "jsonrpc": "2.0",
+      "id": "mobile-1",
+      "result": {
+        "session_id": "runtime-1",
+        "stored_session_id": "stored-1"
+      }
+    },
+    "error": {
+      "jsonrpc": "2.0",
+      "id": "mobile-1",
+      "error": {
+        "code": 4007,
+        "message": "session not found"
+      }
+    },
+    "event": {
+      "jsonrpc": "2.0",
+      "method": "event",
+      "params": {
+        "type": "message.delta",
+        "session_id": "runtime-1",
+        "payload": {
+          "text": "Hello"
+        }
+      }
+    }
+  }
+}
