@@ -28,12 +28,20 @@ class GatewayRpcException(
   message: String,
 ) : IllegalStateException(message)
 
+interface JsonObjectRpcClient {
+  val events: SharedFlow<GatewayEvent>
+
+  suspend fun connect()
+  suspend fun request(method: String, params: JsonObject = buildJsonObject {}): JsonObject
+  fun close()
+}
+
 class GatewaySocketClient(
   private val endpoint: GatewayEndpoint,
   private val credentialProvider: suspend () -> GatewayCredential?,
   private val httpClient: OkHttpClient = OkHttpClient(),
   private val requestTimeoutMillis: Long = 60_000,
-) {
+) : JsonObjectRpcClient {
   private val ids = AtomicLong(0)
   private val pending = ConcurrentHashMap<String, CompletableDeferred<JsonObject>>()
   private val mutableEvents = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 128)
@@ -43,10 +51,10 @@ class GatewaySocketClient(
   @Volatile
   private var socket: WebSocket? = null
 
-  val events: SharedFlow<GatewayEvent> = mutableEvents
+  override val events: SharedFlow<GatewayEvent> = mutableEvents
   val state: StateFlow<SocketState> = mutableState
 
-  suspend fun connect() {
+  override suspend fun connect() {
     synchronized(socketLock) {
       if (socket != null && mutableState.value == SocketState.CONNECTED) return
       mutableState.value = SocketState.CONNECTING
@@ -71,9 +79,9 @@ class GatewaySocketClient(
     }
   }
 
-  suspend fun request(
+  override suspend fun request(
     method: String,
-    params: JsonObject = buildJsonObject {},
+    params: JsonObject,
   ): JsonObject {
     if (mutableState.value != SocketState.CONNECTED) connect()
     val id = "mobile-${ids.incrementAndGet()}"
@@ -100,7 +108,7 @@ class GatewaySocketClient(
     failPending(IllegalStateException("Gateway WebSocket disconnected"))
   }
 
-  fun close() {
+  override fun close() {
     disconnect()
     httpClient.dispatcher.cancelAll()
   }
