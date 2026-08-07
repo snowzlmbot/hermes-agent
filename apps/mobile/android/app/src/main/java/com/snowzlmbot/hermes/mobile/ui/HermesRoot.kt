@@ -23,12 +23,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Send
+
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Wifi
@@ -496,7 +497,10 @@ private fun Composer(
       )
       Spacer(Modifier.width(4.dp))
       IconButton(onClick = if (streaming) onStop else onSend, enabled = streaming || value.isNotBlank(), modifier = Modifier.testTag(if (streaming) "stop" else "send")) {
-        Icon(if (streaming) Icons.Default.Stop else Icons.Default.Send, contentDescription = if (streaming) "Stop" else "Send")
+        Icon(
+          if (streaming) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send,
+          contentDescription = if (streaming) "Stop" else "Send",
+        )
       }
     }
   }
