@@ -51,6 +51,10 @@ class GatewaySocketClientTest {
             """{"jsonrpc":"2.0","method":"event","params":{"type":"sessions.changed","payload":{}}}""",
           )
         }
+
+        override fun onClosing(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
+          webSocket.close(code, reason)
+        }
       }),
     )
     var credentialCalls = 0
@@ -85,6 +89,10 @@ class GatewaySocketClientTest {
             webSocket.send(
               """{"jsonrpc":"2.0","method":"event","params":{"type":"gateway.ready","payload":{}}}""",
             )
+          }
+
+          override fun onClosing(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
+            webSocket.close(code, reason)
           }
         }),
       )
