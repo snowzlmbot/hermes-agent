@@ -1,8 +1,34 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "auth": {
+    "public_status_path": "/api/status",
+    "native_mobile_flow": "native_pkce_mobile",
+    "native_mobile_redirect_uri": "com.snowzlmbot.hermes.mobile:/oauth/callback",
+    "native_authorize_path": "/auth/native/authorize",
+    "native_token_path": "/auth/native/token",
+    "native_refresh_path": "/auth/native/refresh",
+    "pkce_method": "S256",
     "rest_headers": ["X-Hermes-Session-Token", "Authorization"],
     "websocket_query_modes": ["token", "ticket"]
+  },
+  "rest": {
+    "ws_ticket": {
+      "method": "POST",
+      "path": "/api/auth/ws-ticket",
+      "ticket_field": "ticket",
+      "ttl_field": "ttl_seconds",
+      "single_use": true
+    },
+    "sessions": {
+      "list": {"method": "GET", "path": "/api/sessions"},
+      "update": {"method": "PATCH", "path": "/api/sessions/{stored_session_id}"},
+      "delete": {"method": "DELETE", "path": "/api/sessions/{stored_session_id}"},
+      "update_fields": ["title", "archived", "pinned"]
+    },
+    "audio": {
+      "transcribe": {"method": "POST", "path": "/api/audio/transcribe"},
+      "speak": {"method": "POST", "path": "/api/audio/speak"}
+    }
   },
   "rpc_methods": [
     "session.list",
@@ -15,23 +41,58 @@
     "model.options",
     "approval.respond",
     "clarify.respond",
+    "secret.respond",
+    "sudo.respond",
     "image.attach_bytes",
     "pdf.attach",
     "file.attach"
   ],
+  "responses": {
+    "approval.respond": "choice",
+    "clarify.respond": "answer",
+    "secret.respond": "value",
+    "sudo.respond": "password"
+  },
+  "attachments": {
+    "image.attach_bytes": {
+      "bytes_field": "content_base64",
+      "name_field": "filename",
+      "max_bytes": 26214400
+    },
+    "pdf.attach": {
+      "bytes_field": "content_base64",
+      "name_field": "filename",
+      "max_bytes": 52428800,
+      "max_pages": 25
+    },
+    "file.attach": {
+      "bytes_field": "data_url",
+      "name_field": "name",
+      "result_reference_field": "ref_text"
+    }
+  },
+  "message_terminal_statuses": ["complete", "interrupted", "error"],
   "event_types": [
     "gateway.ready",
     "session.info",
+    "session.title",
     "message.start",
     "message.delta",
     "message.interim",
     "message.complete",
     "reasoning.delta",
+    "thinking.delta",
+    "status.update",
     "tool.start",
     "tool.progress",
     "tool.complete",
     "approval.request",
     "clarify.request",
+    "clarify.expire",
+    "secret.request",
+    "secret.expire",
+    "sudo.request",
+    "sudo.expire",
     "error",
     "sessions.changed"
   ],
@@ -66,10 +127,11 @@
       "jsonrpc": "2.0",
       "method": "event",
       "params": {
-        "type": "message.delta",
+        "type": "message.complete",
         "session_id": "runtime-1",
         "payload": {
-          "text": "Hello"
+          "text": "Hello",
+          "status": "complete"
         }
       }
     }

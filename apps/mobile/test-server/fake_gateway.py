@@ -72,6 +72,8 @@ class _StoredSession:
     preview: str
     started_at: float
     messages: list[dict[str, Any]]
+    archived: bool = False
+    pinned: bool = False
 
 
 class FakeHermesGateway:
@@ -81,6 +83,9 @@ class FakeHermesGateway:
         self.token = token
         self.rpc_requests = 0
         self._tickets: set[str] = set()
+        self._native_codes: dict[str, str] = {}
+        self._access_tokens: set[str] = set()
+        self._refresh_tokens: set[str] = set()
         self._lock = threading.Lock()
         self._server: http.server.ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -141,7 +146,10 @@ class FakeHermesGateway:
             def _authenticated(self) -> bool:
                 session_token = self.headers.get("X-Hermes-Session-Token", "")
                 bearer = self.headers.get("Authorization", "")
-                return session_token == gateway.token or bearer == f"Bearer {gateway.token}"
+                bearer_token = bearer.removeprefix("Bearer ") if bearer.startswith("Bearer ") else ""
+                with gateway._lock:
+                    oauth_valid = bearer_token in gateway._access_tokens
+                return session_token == gateway.token or bearer_token == gateway.token or oauth_valid
 
             def _json(self, status: int, payload: dict[str, Any]) -> None:
                 encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -164,11 +172,65 @@ class FakeHermesGateway:
                     self._json(
                         200,
                         {
-                            "status": "ok",
-                            "embedded_chat": True,
                             "version": "test",
                             "gateway_running": True,
+                            "gateway_state": "running",
+                            "auth_required": True,
+                            "auth_providers": ["fixture"],
+                            "auth_flows": ["cookie", "native_pkce", "native_pkce_mobile"],
                         },
+                    )
+                    return
+                if parsed.path == "/auth/native/authorize":
+                    query = urllib.parse.parse_qs(parsed.query)
+                    redirect_uri = (query.get("redirect_uri") or [""])[0]
+                    challenge = (query.get("code_challenge") or [""])[0]
+                    method = (query.get("code_challenge_method") or [""])[0]
+                    state = (query.get("state") or [""])[0]
+                    if redirect_uri != gateway.mobile_redirect_uri:
+                        self._json(400, {"detail": "unregistered native redirect_uri"})
+                        return
+                    if method.upper() != "S256" or not challenge or not state:
+                        self._json(400, {"detail": "valid S256 PKCE and state are required"})
+                        return
+                    code = uuid.uuid4().hex
+                    with gateway._lock:
+                        gateway._native_codes[code] = challenge
+                    location = f"{redirect_uri}?{urllib.parse.urlencode({'code': code, 'state': state})}"
+                    self.send_response(302)
+                    self.send_header("Location", location)
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if parsed.path == "/api/sessions":
+                    if not self._require_auth():
+                        return
+                    query = urllib.parse.parse_qs(parsed.query)
+                    archived = (query.get("archived") or ["exclude"])[0]
+                    try:
+                        limit = max(0, min(100, int((query.get("limit") or [20])[0])))
+                        offset = max(0, int((query.get("offset") or [0])[0]))
+                    except (TypeError, ValueError):
+                        self._json(400, {"detail": "invalid pagination"})
+                        return
+                    with gateway._lock:
+                        rows = sorted(
+                            gateway._sessions.values(), key=lambda row: row.started_at, reverse=True
+                        )
+                        if archived == "exclude":
+                            rows = [row for row in rows if not row.archived]
+                        elif archived == "only":
+                            rows = [row for row in rows if row.archived]
+                        elif archived != "include":
+                            self._json(400, {"detail": "invalid archived filter"})
+                            return
+                        total = len(rows)
+                        page = rows[offset : offset + limit]
+                        payload = [gateway._session_payload(row) for row in page]
+                    self._json(
+                        200,
+                        {"sessions": payload, "total": total, "limit": limit, "offset": offset},
                     )
                     return
                 if parsed.path == "/api/ws" and self.headers.get("Upgrade", "").lower() == "websocket":
@@ -184,7 +246,35 @@ class FakeHermesGateway:
                     ticket = uuid.uuid4().hex
                     with gateway._lock:
                         gateway._tickets.add(ticket)
-                    self._json(200, {"ticket": ticket, "expires_in": 30})
+                    self._json(200, {"ticket": ticket, "ttl_seconds": 30})
+                    return
+                if parsed.path == "/auth/native/token":
+                    payload = self._body()
+                    code = str(payload.get("code") or "")
+                    verifier = str(payload.get("code_verifier") or "")
+                    with gateway._lock:
+                        challenge = gateway._native_codes.pop(code, None)
+                    if not challenge or gateway.pkce_challenge(verifier) != challenge:
+                        self._json(400, {"detail": "Invalid or expired authorization code."})
+                        return
+                    self._json(200, gateway._issue_oauth_tokens())
+                    return
+                if parsed.path == "/auth/native/refresh":
+                    payload = self._body()
+                    refresh_token = str(payload.get("refresh_token") or "")
+                    with gateway._lock:
+                        valid = refresh_token in gateway._refresh_tokens
+                        gateway._refresh_tokens.discard(refresh_token)
+                    if not valid:
+                        self._json(
+                            401,
+                            {
+                                "error": "session_expired",
+                                "detail": "Refresh token expired or invalid; start a new sign-in.",
+                            },
+                        )
+                        return
+                    self._json(200, gateway._issue_oauth_tokens())
                     return
                 if parsed.path == "/api/audio/transcribe":
                     if not self._require_auth():
@@ -217,6 +307,55 @@ class FakeHermesGateway:
                     return
                 self._json(404, {"detail": "not found"})
 
+            def do_PATCH(self) -> None:  # noqa: N802
+                parsed = urllib.parse.urlsplit(self.path)
+                prefix = "/api/sessions/"
+                if not parsed.path.startswith(prefix):
+                    self._json(404, {"detail": "not found"})
+                    return
+                if not self._require_auth():
+                    return
+                stored_id = urllib.parse.unquote(parsed.path[len(prefix) :])
+                payload = self._body()
+                with gateway._lock:
+                    session = gateway._sessions.get(stored_id)
+                    if session is None:
+                        self._json(404, {"detail": "Session not found"})
+                        return
+                    if not any(key in payload for key in ("title", "archived", "pinned")):
+                        self._json(400, {"detail": "Nothing to update"})
+                        return
+                    if "title" in payload:
+                        session.title = str(payload.get("title") or "")
+                    if "archived" in payload:
+                        session.archived = bool(payload["archived"])
+                    if "pinned" in payload:
+                        session.pinned = bool(payload["pinned"])
+                    result = {"ok": True, "title": session.title}
+                    if "archived" in payload:
+                        result["archived"] = session.archived
+                    if "pinned" in payload:
+                        result["pinned"] = session.pinned
+                self._json(200, result)
+
+            def do_DELETE(self) -> None:  # noqa: N802
+                parsed = urllib.parse.urlsplit(self.path)
+                prefix = "/api/sessions/"
+                if not parsed.path.startswith(prefix):
+                    self._json(404, {"detail": "not found"})
+                    return
+                if not self._require_auth():
+                    return
+                stored_id = urllib.parse.unquote(parsed.path[len(prefix) :])
+                with gateway._lock:
+                    existed = gateway._sessions.pop(stored_id, None) is not None
+                    gateway._runtime_to_stored = {
+                        runtime: stored
+                        for runtime, stored in gateway._runtime_to_stored.items()
+                        if stored != stored_id
+                    }
+                self._json(200, {"ok": True, **({"already_absent": True} if not existed else {})})
+
         self._server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self._server.daemon_threads = True
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
@@ -231,6 +370,30 @@ class FakeHermesGateway:
             server.server_close()
         if thread is not None:
             thread.join(timeout=3)
+
+    @property
+    def mobile_redirect_uri(self) -> str:
+        return "com.snowzlmbot.hermes.mobile:/oauth/callback"
+
+    @staticmethod
+    def pkce_challenge(verifier: str) -> str:
+        digest = hashlib.sha256(verifier.encode("ascii")).digest()
+        return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+    def _issue_oauth_tokens(self) -> dict[str, Any]:
+        access_token = f"fixture-at-{uuid.uuid4().hex}"
+        refresh_token = f"fixture-rt-{uuid.uuid4().hex}"
+        with self._lock:
+            self._access_tokens.add(access_token)
+            self._refresh_tokens.add(refresh_token)
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "Bearer",
+            "expires_at": int(time.time()) + 3600,
+            "provider": "fixture",
+            "user_id": "fixture-user",
+        }
 
     def _authorize_websocket(self, query: dict[str, list[str]]) -> bool:
         token = (query.get("token") or [""])[0]
@@ -346,6 +509,8 @@ class FakeHermesGateway:
             "last_active": session.started_at,
             "message_count": len(session.messages),
             "source": "mobile",
+            "archived": session.archived,
+            "pinned": session.pinned,
         }
 
     def _new_runtime(self, stored_id: str) -> str:
@@ -466,11 +631,25 @@ class FakeHermesGateway:
                     },
                 ), []
 
-            if method in {"approval.respond", "clarify.respond"}:
+            if method == "approval.respond":
                 _runtime_id, error = self._require_runtime(request_id, params)
                 if error:
                     return error, []
                 return self._ok(request_id, {"resolved": True}), []
+
+            response_fields = {
+                "clarify.respond": "answer",
+                "secret.respond": "value",
+                "sudo.respond": "password",
+            }
+            if method in response_fields:
+                _runtime_id, error = self._require_runtime(request_id, params)
+                if error:
+                    return error, []
+                field = response_fields[method]
+                if not str(params.get("request_id") or "") or field not in params:
+                    return self._error(request_id, 4015, f"request_id and {field} required"), []
+                return self._ok(request_id, {"status": "ok"}), []
 
             if method == "session.interrupt":
                 runtime_id, error = self._require_runtime(request_id, params)
@@ -484,28 +663,32 @@ class FakeHermesGateway:
                 _runtime_id, error = self._require_runtime(request_id, params)
                 if error:
                     return error, []
-                raw = str(
-                    params.get("content_base64")
-                    or params.get("data")
-                    or params.get("data_url")
-                    or ""
-                )
-                if method == "image.attach_bytes" and not raw:
-                    return self._error(request_id, 4015, "content_base64 required"), []
+                bytes_field = "data_url" if method == "file.attach" else "content_base64"
+                raw = str(params.get(bytes_field) or "")
+                if not raw:
+                    return self._error(request_id, 4015, f"{bytes_field} required"), []
                 encoded = raw.split(",", 1)[-1]
                 try:
-                    size = len(base64.b64decode(encoded, validate=True)) if encoded else 0
+                    size = len(base64.b64decode(encoded, validate=True))
                 except ValueError:
                     return self._error(request_id, 4017, "data is not valid base64"), []
-                return self._ok(
-                    request_id,
-                    {
-                        "attached": True,
-                        "name": str(params.get("filename") or params.get("name") or "attachment"),
-                        "bytes": size,
-                        "text": "[Attachment accepted]",
-                    },
-                ), []
+                name = str(params.get("filename") or params.get("name") or "attachment")
+                result: dict[str, Any] = {
+                    "attached": True,
+                    "name": name,
+                    "bytes": size,
+                }
+                if method == "file.attach":
+                    result.update(
+                        {
+                            "ref_path": f".hermes/desktop-attachments/{name}",
+                            "ref_text": f"@file:.hermes/desktop-attachments/{name}",
+                            "uploaded": True,
+                        }
+                    )
+                else:
+                    result["text"] = "[Attachment accepted]"
+                return self._ok(request_id, result), []
 
             if method == "prompt.submit":
                 runtime_id, error = self._require_runtime(request_id, params)
@@ -693,7 +876,7 @@ def run_self_test() -> dict[str, Any]:
     try:
         with urllib.request.urlopen(f"{gateway.http_url}/api/status", timeout=3) as response:
             status = json.loads(response.read())
-        if status.get("status") != "ok":
+        if not status.get("gateway_running"):
             raise RuntimeError("status endpoint failed")
         client = JsonRpcWebSocketClient.connect(f"{gateway.ws_url}?token={gateway.token}")
         try:
