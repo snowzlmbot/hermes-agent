@@ -35,7 +35,7 @@ public enum GatewayRESTRequestBuilder {
         auth: StoredGatewayAuth,
         body: [String: Any] = [:]
     ) throws -> URLRequest {
-        request(endpoint: endpoint, url: endpoint.apiURL(path), method: method, auth: auth, body: body)
+        try request(endpoint: endpoint, url: endpoint.apiURL(path), method: method, auth: auth, body: body)
     }
 
     private static func request(
