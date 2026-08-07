@@ -4,6 +4,7 @@ import json
 import sys
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -48,8 +49,9 @@ class FakeGatewayContractTests(unittest.TestCase):
     def test_status_is_public_but_audio_requires_authentication(self) -> None:
         status, payload = self.request_json("/api/status")
         self.assertEqual(status, 200)
-        self.assertEqual(payload["status"], "ok")
-        self.assertTrue(payload["embedded_chat"])
+        self.assertTrue(payload["gateway_running"])
+        self.assertTrue(payload["auth_required"])
+        self.assertIn("native_pkce_mobile", payload["auth_flows"])
 
         status, payload = self.request_json(
             "/api/audio/transcribe",
@@ -74,6 +76,7 @@ class FakeGatewayContractTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         ticket = payload["ticket"]
+        self.assertEqual(payload["ttl_seconds"], 30)
 
         client = JsonRpcWebSocketClient.connect(f"{self.gateway.ws_url}?ticket={ticket}")
         self.addCleanup(client.close)
@@ -82,6 +85,78 @@ class FakeGatewayContractTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ConnectionError, "401"):
             JsonRpcWebSocketClient.connect(f"{self.gateway.ws_url}?ticket={ticket}")
+
+    def test_native_pkce_mobile_flow_exchanges_and_refreshes_tokens(self) -> None:
+        verifier = "mobile-verifier-with-at-least-forty-three-characters-0123456789"
+        challenge = self.gateway.pkce_challenge(verifier)
+        callback = "com.snowzlmbot.hermes.mobile:/oauth/callback"
+        query = urllib.parse.urlencode(
+            {
+                "provider": "fixture",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+                "redirect_uri": callback,
+                "state": "mobile-state",
+            }
+        )
+        opener = urllib.request.build_opener(_NoRedirectHandler())
+        request = urllib.request.Request(
+            f"{self.gateway.http_url}/auth/native/authorize?{query}", method="GET"
+        )
+        with self.assertRaises(urllib.error.HTTPError) as caught:
+            opener.open(request, timeout=3)
+        self.assertEqual(caught.exception.code, 302)
+        redirect = urllib.parse.urlsplit(caught.exception.headers["Location"])
+        self.assertEqual(
+            f"{redirect.scheme}:{redirect.path}",
+            "com.snowzlmbot.hermes.mobile:/oauth/callback",
+        )
+        values = urllib.parse.parse_qs(redirect.query)
+        self.assertEqual(values["state"], ["mobile-state"])
+
+        status, tokens = self.request_json(
+            "/auth/native/token",
+            method="POST",
+            payload={"code": values["code"][0], "code_verifier": verifier},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(tokens["token_type"], "Bearer")
+        self.assertIn("expires_at", tokens)
+
+        status, refreshed = self.request_json(
+            "/auth/native/refresh",
+            method="POST",
+            payload={
+                "refresh_token": tokens["refresh_token"],
+                "provider": tokens["provider"],
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertNotEqual(refreshed["refresh_token"], tokens["refresh_token"])
+
+    def test_rest_session_mutations_use_durable_identity(self) -> None:
+        status, listed = self.request_json(
+            "/api/sessions?order=recent&archived=include",
+            authenticated=True,
+        )
+        self.assertEqual(status, 200)
+        stored_id = listed["sessions"][0]["id"]
+
+        status, updated = self.request_json(
+            f"/api/sessions/{stored_id}",
+            method="PATCH",
+            payload={"title": "Mobile session", "archived": True},
+            authenticated=True,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(updated["title"], "Mobile session")
+        self.assertTrue(updated["archived"])
+
+        status, deleted = self.request_json(
+            f"/api/sessions/{stored_id}", method="DELETE", authenticated=True
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(deleted["ok"])
 
     def test_session_lifecycle_and_stream_events_match_contract(self) -> None:
         client = JsonRpcWebSocketClient.connect(
@@ -127,6 +202,26 @@ class FakeGatewayContractTests(unittest.TestCase):
         )
         self.assertTrue(approved["resolved"])
 
+        clarified = client.request(
+            "clarify.respond",
+            {
+                "session_id": runtime_id,
+                "request_id": "clarify-1",
+                "answer": "production",
+            },
+        )
+        self.assertEqual(clarified["status"], "ok")
+        secret = client.request(
+            "secret.respond",
+            {"session_id": runtime_id, "request_id": "secret-1", "value": ""},
+        )
+        self.assertEqual(secret["status"], "ok")
+        sudo = client.request(
+            "sudo.respond",
+            {"session_id": runtime_id, "request_id": "sudo-1", "password": ""},
+        )
+        self.assertEqual(sudo["status"], "ok")
+
         attached = client.request(
             "image.attach_bytes",
             {
@@ -144,13 +239,59 @@ class FakeGatewayContractTests(unittest.TestCase):
                 {"session_id": runtime_id, "filename": "empty.png"},
             )
 
+        pdf = client.request(
+            "pdf.attach",
+            {
+                "session_id": runtime_id,
+                "filename": "sample.pdf",
+                "content_base64": "JVBERi0xLjQK",
+            },
+        )
+        self.assertTrue(pdf["attached"])
+        with self.assertRaisesRegex(RuntimeError, "content_base64 required"):
+            client.request(
+                "pdf.attach",
+                {"session_id": runtime_id, "filename": "sample.pdf", "data_url": "data:application/pdf;base64,JVBERg=="},
+            )
+
+        ordinary = client.request(
+            "file.attach",
+            {
+                "session_id": runtime_id,
+                "name": "notes.txt",
+                "data_url": "data:text/plain;base64,aGVsbG8=",
+            },
+        )
+        self.assertTrue(ordinary["attached"])
+        self.assertTrue(ordinary["ref_text"].startswith("@file:"))
+        with self.assertRaisesRegex(RuntimeError, "data_url required"):
+            client.request(
+                "file.attach",
+                {"session_id": runtime_id, "name": "notes.txt", "content_base64": "aGVsbG8="},
+            )
+
     def test_contract_fixture_has_request_and_event_examples(self) -> None:
         contract = json.loads((MOBILE_ROOT / "protocol" / "contract.json").read_text())
         self.assertGreaterEqual(contract["schema_version"], 1)
         self.assertIn("session.create", contract["rpc_methods"])
         self.assertIn("message.delta", contract["event_types"])
+        self.assertIn("clarify.expire", contract["event_types"])
+        self.assertIn("secret.expire", contract["event_types"])
+        self.assertIn("sudo.expire", contract["event_types"])
+        self.assertEqual(contract["auth"]["native_mobile_flow"], "native_pkce_mobile")
+        self.assertEqual(contract["rest"]["ws_ticket"]["ttl_field"], "ttl_seconds")
+        self.assertEqual(contract["responses"]["clarify.respond"], "answer")
+        self.assertEqual(contract["responses"]["secret.respond"], "value")
+        self.assertEqual(contract["responses"]["sudo.respond"], "password")
+        self.assertEqual(contract["attachments"]["file.attach"]["bytes_field"], "data_url")
         self.assertEqual(contract["frames"]["request"]["jsonrpc"], "2.0")
         self.assertEqual(contract["frames"]["event"]["method"], "event")
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        del req, fp, code, msg, headers, newurl
+        return None
 
 
 class FakeGatewaySelfTestTests(unittest.TestCase):
