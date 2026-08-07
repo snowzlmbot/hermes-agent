@@ -3199,6 +3199,12 @@ async def get_status(profile: Optional[str] = None):
                 ]
                 if brokerable:
                     auth_flows.append("native_pkce")
+                    # Native mobile clients use the gateway-brokered PKCE flow
+                    # with the one fixed application callback accepted by the
+                    # auth routes. Keep this separate from ``native_pkce`` so
+                    # clients can distinguish an older, loopback-only gateway
+                    # before opening a system authentication session.
+                    auth_flows.append("native_pkce_mobile")
         except Exception:
             # Module not importable yet (early startup) — leave as [].
             pass

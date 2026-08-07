@@ -250,8 +250,11 @@ async def auth_login(request: Request, provider: str, next: str = ""):
 # ---------------------------------------------------------------------------
 
 
-def _validate_loopback_redirect_uri(raw: str) -> str:
-    """Return ``raw`` if it is a safe loopback redirect_uri, else raise.
+_MOBILE_NATIVE_REDIRECT_URI = "com.snowzlmbot.hermes.mobile:/oauth/callback"
+
+
+def _validate_native_redirect_uri(raw: str) -> str:
+    """Return ``raw`` if it is an approved native-app redirect URI.
 
     RFC 8252 §7.3 restricts native-app redirects to the loopback interface.
     We accept only ``http://127.0.0.1[:port]/...`` and ``http://[::1][:port]/...``
@@ -263,16 +266,27 @@ def _validate_loopback_redirect_uri(raw: str) -> str:
     authorize`` (a public route) turn the gateway's authenticated callback
     into an open redirect that leaks a live authorization code to an
     arbitrary origin — so this check is a security boundary, not ergonomics.
+
+    Mobile clients cannot bind the desktop's loopback callback reliably while
+    the system authentication browser owns the foreground. They use one fixed,
+    application-claimed private-use URI instead. It is matched byte-for-byte:
+    accepting arbitrary schemes, hosts, or paths would turn this public route
+    into an authorization-code redirector for another installed application.
     """
     from urllib.parse import urlparse
 
     if not raw:
         raise HTTPException(status_code=400, detail="redirect_uri required")
+    if raw == _MOBILE_NATIVE_REDIRECT_URI:
+        return raw
     parsed = urlparse(raw)
     if parsed.scheme != "http":
         raise HTTPException(
             status_code=400,
-            detail="native redirect_uri must be http:// on the loopback interface",
+            detail=(
+                "native redirect_uri must be the registered mobile callback or "
+                "http:// on the loopback interface"
+            ),
         )
     host = (parsed.hostname or "").lower()
     if host not in ("127.0.0.1", "::1"):
@@ -313,7 +327,7 @@ async def auth_native_authorize(
         )
     if not code_challenge:
         raise HTTPException(status_code=400, detail="code_challenge required")
-    _validate_loopback_redirect_uri(redirect_uri)
+    _validate_native_redirect_uri(redirect_uri)
 
     # Resolve the provider. With exactly one session provider registered
     # (the common hosted case) an empty ``provider`` selects it, mirroring
