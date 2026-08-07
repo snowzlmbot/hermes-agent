@@ -181,6 +181,51 @@ def test_native_authorize_rejects_non_loopback_redirect(gated_client):
     assert "loopback" in r.json()["detail"].lower()
 
 
+def test_native_authorize_accepts_registered_mobile_redirect(gated_client):
+    verifier, challenge = _make_pkce()
+    code, returned_state = _walk_native_login(
+        gated_client,
+        redirect_uri="com.snowzlmbot.hermes.mobile:/oauth/callback",
+        challenge=challenge,
+        state="mobile-state",
+    )
+
+    assert returned_state == "mobile-state"
+    tokens = gated_client.post(
+        "/auth/native/token",
+        json={"code": code, "code_verifier": verifier},
+    )
+    assert tokens.status_code == 200
+    assert tokens.json()["token_type"] == "Bearer"
+
+
+@pytest.mark.parametrize(
+    "redirect_uri",
+    [
+        "com.attacker.app:/oauth/callback",
+        "com.snowzlmbot.hermes.mobile:/different/path",
+        "com.snowzlmbot.hermes.mobile://attacker.example/oauth/callback",
+        "https://mobile.example/oauth/callback",
+    ],
+)
+def test_native_authorize_rejects_unregistered_mobile_redirects(
+    gated_client, redirect_uri
+):
+    _verifier, challenge = _make_pkce()
+    response = gated_client.get(
+        "/auth/native/authorize",
+        params={
+            "provider": "stub",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "redirect_uri": redirect_uri,
+            "state": "mobile-state",
+        },
+    )
+
+    assert response.status_code == 400
+
+
 # ---------------------------------------------------------------------------
 # Cookieless bearer auth of a gated route — the core deliverable
 # ---------------------------------------------------------------------------
@@ -230,6 +275,14 @@ def test_status_loopback_mode_has_no_auth_flows():
         assert body["auth_flows"] == []
     finally:
         web_server.app.state.auth_required = prev_required
+
+
+def test_status_advertises_registered_mobile_pkce_flow(gated_client):
+    body = gated_client.get("/api/status").json()
+
+    assert body["auth_required"] is True
+    assert "native_pkce" in body["auth_flows"]
+    assert "native_pkce_mobile" in body["auth_flows"]
 
 
 # ---------------------------------------------------------------------------
