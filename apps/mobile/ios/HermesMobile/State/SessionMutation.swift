@@ -16,6 +16,7 @@ public struct SessionMutation: Equatable, Sendable {
 
 public protocol SessionMutationClient: Sendable {
     func patchSession(_ mutation: SessionMutation) async throws
+    func deleteSession(_ storedID: String) async throws
 }
 
 extension GatewayRESTClient: SessionMutationClient {}

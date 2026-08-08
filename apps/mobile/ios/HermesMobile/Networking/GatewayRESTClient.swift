@@ -117,6 +117,21 @@ public actor GatewayRESTClient {
         }
     }
 
+    public func deleteSession(_ storedID: String) async throws {
+        try await refreshOAuthIfNeeded()
+        let request = try GatewayRESTRequestBuilder.deleteSessionRequest(
+            endpoint: endpoint,
+            auth: credentials.auth,
+            storedID: storedID
+        )
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            if http.statusCode == 401 { throw GatewayRESTError.expiredSession }
+            throw GatewayRESTError.http(http.statusCode, Self.detail(from: data))
+        }
+    }
+
     private func sendJSON(path: String, body: [String: Any], method: String = "POST") async throws -> Data {
         try await refreshOAuthIfNeeded()
         let request = try GatewayRESTRequestBuilder.request(

@@ -28,6 +28,20 @@ public enum GatewayRESTRequestBuilder {
         return try request(endpoint: endpoint, url: url, method: "PATCH", auth: auth, body: body)
     }
 
+    public static func deleteSessionRequest(
+        endpoint: GatewayEndpoint,
+        auth: StoredGatewayAuth,
+        storedID: String
+    ) throws -> URLRequest {
+        guard !storedID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw GatewayRESTRequestError.invalidSessionID
+        }
+
+        let sessionsURL = endpoint.apiURL("api/sessions")
+        let url = sessionsURL.appendingPathComponent(storedID, isDirectory: false)
+        return try request(endpoint: endpoint, url: url, method: "DELETE", auth: auth, body: [:])
+    }
+
     public static func request(
         endpoint: GatewayEndpoint,
         path: String,

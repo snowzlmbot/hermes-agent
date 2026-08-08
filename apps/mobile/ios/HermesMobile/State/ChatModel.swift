@@ -199,10 +199,11 @@ public final class ChatModel {
     }
 
     public func delete(storedSessionID: String) async throws {
-        _ = try await transport.request(
-            GatewayMethod.sessionDelete,
-            params: ["session_id": .string(storedSessionID)]
-        )
+        if let sessionMutationClient {
+            try await sessionMutationClient.deleteSession(storedSessionID)
+        } else {
+            throw ChatModelError.archiveUnavailable
+        }
         sessions.removeAll { $0.storedID == storedSessionID }
         if state.storedSessionID == storedSessionID {
             state = .empty
