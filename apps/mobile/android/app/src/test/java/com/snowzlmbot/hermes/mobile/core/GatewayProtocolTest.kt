@@ -56,11 +56,12 @@ class GatewayProtocolTest {
   fun parsesDurableSessionListAndRuntimeResumeIdentitySeparately() {
     val sessions = GatewayProtocol.parseSessionList(
       jsonObject(
-        """{"sessions":[{"id":"stored-1","title":"Welcome","preview":"Hi","started_at":1700000000,"message_count":2,"source":"mobile"}]}""",
+        """{"sessions":[{"id":"stored-1","title":"Welcome","preview":"Hi","started_at":1700000000,"message_count":2,"source":"mobile","pinned":true}]}""",
       ),
     )
     assertEquals("stored-1", sessions.single().storedId)
     assertEquals("Welcome", sessions.single().displayTitle)
+    assertTrue(sessions.single().pinned)
 
     val active = GatewayProtocol.parseActiveSession(
       jsonObject(

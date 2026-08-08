@@ -67,6 +67,27 @@ final class ChatModelTests: XCTestCase {
         XCTAssertTrue(requests.isEmpty)
     }
 
+    func testRemotePinUsesDurableSessionMutationClientAndUpdatesSummary() async throws {
+        let socket = RecordingSocket()
+        let mutations = RecordingSessionMutationClient()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(
+            transport: transport,
+            sessionMutationClient: mutations,
+            sessions: [SessionSummary(storedID: "stored-1", title: "Roadmap")]
+        )
+
+        try await model.connect()
+        try await model.setPinned(true, storedSessionID: "stored-1")
+
+        let recorded = await mutations.mutations
+        let requests = await socket.requests
+        XCTAssertEqual(recorded, [.init(storedID: "stored-1", pinned: true)])
+        XCTAssertTrue(try XCTUnwrap(model.sessions.first).pinned)
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     func testRemoteDeleteUsesDurableSessionMutationClient() async throws {
         let socket = RecordingSocket()
         let archive = RecordingSessionMutationClient()

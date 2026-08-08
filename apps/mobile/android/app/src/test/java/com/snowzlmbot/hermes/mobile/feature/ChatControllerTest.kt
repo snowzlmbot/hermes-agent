@@ -83,16 +83,33 @@ class ChatControllerTest {
     assertEquals(null, controller.state.value.error)
   }
 
+  @Test
+  fun pinningUsesStoredIdentityAndRefreshesSessions() = runTest {
+    val runtime = RecordingRuntime()
+    val controller = ChatController(runtime, backgroundScope)
+    controller.connect()
+
+    controller.setPinned("stored-1", true)
+
+    assertEquals(listOf("stored-1" to true), runtime.pinnedUpdates)
+    assertEquals(2, runtime.sessionListRequests)
+  }
+
   private class RecordingRuntime : MobileGatewayRuntime {
     override val events = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 8)
     val resumed = mutableListOf<String>()
     val prompts = mutableListOf<Pair<String, String>>()
     val interrupted = mutableListOf<String>()
+    val pinnedUpdates = mutableListOf<Pair<String, Boolean>>()
+    var sessionListRequests = 0
     var failPrompts = false
 
     override suspend fun connect() = Unit
 
-    override suspend fun listSessions(): List<SessionSummary> = listOf(summary("stored-1"))
+    override suspend fun listSessions(): List<SessionSummary> {
+      sessionListRequests += 1
+      return listOf(summary("stored-1"))
+    }
 
     override suspend fun createSession(): ActiveSession = active("runtime-new", "stored-new")
 
@@ -108,6 +125,15 @@ class ChatControllerTest {
 
     override suspend fun interrupt(runtimeId: String) {
       interrupted += runtimeId
+    }
+
+    override suspend fun updateSession(
+      storedId: String,
+      title: String?,
+      archived: Boolean?,
+      pinned: Boolean?,
+    ) {
+      pinnedUpdates += storedId to requireNotNull(pinned)
     }
 
     override fun close() = Unit
