@@ -2,6 +2,7 @@ package com.snowzlmbot.hermes.mobile.feature
 
 import com.snowzlmbot.hermes.mobile.core.ActiveSession
 import com.snowzlmbot.hermes.mobile.core.GatewayEvent
+import com.snowzlmbot.hermes.mobile.core.ModelCatalog
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +42,18 @@ internal interface MobileGatewayRuntime {
   suspend fun resumeSession(storedId: String): ActiveSession
   suspend fun submitPrompt(runtimeId: String, text: String)
   suspend fun interrupt(runtimeId: String)
+
+  suspend fun listModelOptions(runtimeId: String): ModelCatalog {
+    error("Model options are unavailable")
+  }
+
+  suspend fun selectModel(runtimeId: String, provider: String, model: String) {
+    error("Model selection is unavailable")
+  }
+
+  suspend fun setReasoningEffort(runtimeId: String, effort: String) {
+    error("Reasoning controls are unavailable")
+  }
 
   suspend fun respondApproval(runtimeId: String, choice: String) {
     error("Approval responses are unavailable")

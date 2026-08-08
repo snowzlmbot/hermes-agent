@@ -145,6 +145,27 @@ data class SessionSummary(
   val displayTitle: String get() = title.ifBlank { preview.ifBlank { "New conversation" } }
 }
 
+data class ModelOption(
+  val providerId: String,
+  val providerName: String,
+  val id: String,
+  val supportsFast: Boolean = false,
+  val supportsReasoning: Boolean = false,
+)
+
+data class ModelProviderOption(
+  val id: String,
+  val name: String,
+  val models: List<ModelOption>,
+  val apiUrl: String? = null,
+)
+
+data class ModelCatalog(
+  val currentModel: String = "",
+  val currentProvider: String = "",
+  val providers: List<ModelProviderOption> = emptyList(),
+)
+
 enum class MessageRole {
   USER,
   ASSISTANT,
@@ -218,6 +239,43 @@ object GatewayProtocol {
       model = info.string("model").orEmpty(),
       provider = info.string("provider").orEmpty(),
       reasoningEffort = info.string("reasoning_effort").orEmpty(),
+    )
+  }
+
+  fun parseModelOptions(result: JsonObject): ModelCatalog {
+    val providers = (result["providers"] as? JsonArray).orEmpty().mapNotNull providerLoop@ { element ->
+      val value = element as? JsonObject ?: return@providerLoop null
+      if (value.boolean("authenticated") != true) return@providerLoop null
+      val providerId = value.string("slug")?.trim()?.takeIf(String::isNotBlank)
+        ?: return@providerLoop null
+      val providerName = value.string("name")?.trim()?.takeIf(String::isNotBlank) ?: providerId
+      val capabilities = value["capabilities"] as? JsonObject ?: buildJsonObject {}
+      val models = (value["models"] as? JsonArray).orEmpty().mapNotNull modelLoop@ { modelElement ->
+        val modelId = (modelElement as? JsonPrimitive)
+          ?.contentOrNull()
+          ?.trim()
+          ?.takeIf(String::isNotBlank)
+          ?: return@modelLoop null
+        val modelCapabilities = capabilities[modelId] as? JsonObject ?: buildJsonObject {}
+        ModelOption(
+          providerId = providerId,
+          providerName = providerName,
+          id = modelId,
+          supportsFast = modelCapabilities.boolean("fast") ?: false,
+          supportsReasoning = modelCapabilities.boolean("reasoning") ?: false,
+        )
+      }.distinctBy { it.id }
+      ModelProviderOption(
+        id = providerId,
+        name = providerName,
+        models = models,
+        apiUrl = value.string("api_url")?.takeIf(String::isNotBlank),
+      )
+    }
+    return ModelCatalog(
+      currentModel = result.string("model").orEmpty(),
+      currentProvider = result.string("provider").orEmpty(),
+      providers = providers,
     )
   }
 

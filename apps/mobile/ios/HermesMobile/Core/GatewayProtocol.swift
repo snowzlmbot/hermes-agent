@@ -66,6 +66,60 @@ public struct SessionSummary: Identifiable, Codable, Equatable, Hashable, Sendab
     }
 }
 
+public struct ModelOption: Identifiable, Equatable, Hashable, Sendable {
+    public let providerID: String
+    public let providerName: String
+    public let modelID: String
+    public let supportsFast: Bool
+    public let supportsReasoning: Bool
+
+    public var id: String { modelID }
+
+    public init(
+        providerID: String,
+        providerName: String,
+        modelID: String,
+        supportsFast: Bool = false,
+        supportsReasoning: Bool = false
+    ) {
+        self.providerID = providerID
+        self.providerName = providerName
+        self.modelID = modelID
+        self.supportsFast = supportsFast
+        self.supportsReasoning = supportsReasoning
+    }
+}
+
+public struct ModelProviderOption: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let models: [ModelOption]
+    public let apiURL: String?
+
+    public init(id: String, name: String, models: [ModelOption], apiURL: String? = nil) {
+        self.id = id
+        self.name = name
+        self.models = models
+        self.apiURL = apiURL
+    }
+}
+
+public struct ModelCatalog: Equatable, Sendable {
+    public let currentModel: String
+    public let currentProvider: String
+    public let providers: [ModelProviderOption]
+
+    public init(
+        currentModel: String = "",
+        currentProvider: String = "",
+        providers: [ModelProviderOption] = []
+    ) {
+        self.currentModel = currentModel
+        self.currentProvider = currentProvider
+        self.providers = providers
+    }
+}
+
 public struct ChatMessageRecord: Identifiable, Codable, Equatable, Sendable {
     public let rowID: Int64?
     public let role: MessageRole
@@ -172,6 +226,44 @@ public enum GatewayProtocol {
             model: info["model"]?.stringValue ?? "",
             provider: info["provider"]?.stringValue ?? "",
             reasoningEffort: info["reasoning_effort"]?.stringValue ?? ""
+        )
+    }
+
+    public static func parseModelOptions(result: JSONValue) -> ModelCatalog {
+        let root = result.object ?? [:]
+        let providers = (root["providers"]?.array ?? []).compactMap { value -> ModelProviderOption? in
+            guard let object = value.object,
+                  object["authenticated"]?.boolValue == true,
+                  let providerID = object["slug"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !providerID.isEmpty else { return nil }
+            let candidateName = object["name"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let providerName = candidateName.isEmpty ? providerID : candidateName
+            let capabilities = object["capabilities"]?.object ?? [:]
+            var seen = Set<String>()
+            let models = (object["models"]?.array ?? []).compactMap { item -> ModelOption? in
+                guard let modelID = item.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !modelID.isEmpty,
+                      seen.insert(modelID).inserted else { return nil }
+                let modelCapabilities = capabilities[modelID]?.object ?? [:]
+                return ModelOption(
+                    providerID: providerID,
+                    providerName: providerName,
+                    modelID: modelID,
+                    supportsFast: modelCapabilities["fast"]?.boolValue ?? false,
+                    supportsReasoning: modelCapabilities["reasoning"]?.boolValue ?? false
+                )
+            }
+            return ModelProviderOption(
+                id: providerID,
+                name: providerName,
+                models: models,
+                apiURL: object["api_url"]?.stringValue
+            )
+        }
+        return ModelCatalog(
+            currentModel: root["model"]?.stringValue ?? "",
+            currentProvider: root["provider"]?.stringValue ?? "",
+            providers: providers
         )
     }
 

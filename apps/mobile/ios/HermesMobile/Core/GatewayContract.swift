@@ -9,6 +9,7 @@ public enum GatewayMethod {
     public static let sessionInterrupt = "session.interrupt"
     public static let promptSubmit = "prompt.submit"
     public static let modelOptions = "model.options"
+    public static let configSet = "config.set"
     public static let approvalRespond = "approval.respond"
     public static let clarifyRespond = "clarify.respond"
     public static let secretRespond = "secret.respond"
@@ -19,7 +20,7 @@ public enum GatewayMethod {
 
     public static let all: [String] = [
         sessionList, sessionCreate, sessionResume, sessionTitle, sessionDelete,
-        sessionInterrupt, promptSubmit, modelOptions, approvalRespond,
+        sessionInterrupt, promptSubmit, modelOptions, configSet, approvalRespond,
         clarifyRespond, secretRespond, sudoRespond, imageAttachBytes, pdfAttach,
         fileAttach
     ]

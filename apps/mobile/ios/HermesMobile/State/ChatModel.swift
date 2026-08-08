@@ -15,6 +15,9 @@ public final class ChatModel {
     public private(set) var sessions: [SessionSummary]
     public private(set) var isConnected: Bool
     public private(set) var isLoadingSessions: Bool
+    public private(set) var selectedModelID: String
+    public private(set) var selectedProviderID: String
+    public private(set) var reasoningEffort: String
 
     @ObservationIgnored public var signalHandler: (@MainActor (ChatSignal) -> Void)?
     @ObservationIgnored private let transport: HermesGatewayTransport
@@ -36,6 +39,9 @@ public final class ChatModel {
         self.sessions = sessions
         self.isConnected = false
         self.isLoadingSessions = false
+        self.selectedModelID = ""
+        self.selectedProviderID = ""
+        self.reasoningEffort = ""
     }
 
 
@@ -159,6 +165,34 @@ public final class ChatModel {
             params: ["session_id": .string(runtimeID)]
         )
         ChatReducer.reduce(&state, action: .streamingChanged(false))
+    }
+
+    public func selectModel(_ option: ModelOption) async throws {
+        guard let runtimeID = state.runtimeSessionID else { throw ChatModelError.sessionRequired }
+        _ = try await transport.request(
+            GatewayMethod.configSet,
+            params: [
+                "session_id": .string(runtimeID),
+                "key": .string("model"),
+                "value": .string("\(option.modelID) --provider \(option.providerID) --session")
+            ]
+        )
+        selectedModelID = option.modelID
+        selectedProviderID = option.providerID
+    }
+
+    public func setReasoningEffort(_ effort: String) async throws {
+        guard let runtimeID = state.runtimeSessionID else { throw ChatModelError.sessionRequired }
+        let normalized = effort.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        _ = try await transport.request(
+            GatewayMethod.configSet,
+            params: [
+                "session_id": .string(runtimeID),
+                "key": .string("reasoning"),
+                "value": .string(normalized)
+            ]
+        )
+        reasoningEffort = normalized
     }
 
     public func renameCurrentSession(_ title: String) async throws {

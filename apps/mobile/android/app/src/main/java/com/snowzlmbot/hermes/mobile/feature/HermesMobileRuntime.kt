@@ -4,6 +4,7 @@ import com.snowzlmbot.hermes.mobile.core.ActiveSession
 import com.snowzlmbot.hermes.mobile.core.GatewayProtocol
 import com.snowzlmbot.hermes.mobile.core.GatewayRestClient
 import com.snowzlmbot.hermes.mobile.core.JsonObjectRpcClient
+import com.snowzlmbot.hermes.mobile.core.ModelCatalog
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.serialization.json.JsonObject
@@ -57,6 +58,36 @@ internal class HermesMobileRuntime(
   override suspend fun connect() = rpc.connect()
 
   override suspend fun listSessions(): List<SessionSummary> = sessions.listSessions()
+
+  override suspend fun listModelOptions(runtimeId: String): ModelCatalog = GatewayProtocol.parseModelOptions(
+    rpc.request("model.options", runtimeParams(runtimeId)),
+  )
+
+  override suspend fun selectModel(runtimeId: String, provider: String, model: String) {
+    require(provider.isNotBlank()) { "Provider is required" }
+    require(model.isNotBlank()) { "Model is required" }
+    rpc.request(
+      "config.set",
+      buildJsonObject {
+        put("session_id", requiredRuntime(runtimeId))
+        put("key", "model")
+        put("value", "${model.trim()} --provider ${provider.trim()} --session")
+      },
+    )
+  }
+
+  override suspend fun setReasoningEffort(runtimeId: String, effort: String) {
+    val normalized = effort.trim().lowercase()
+    require(normalized in REASONING_EFFORTS) { "Unsupported reasoning effort" }
+    rpc.request(
+      "config.set",
+      buildJsonObject {
+        put("session_id", requiredRuntime(runtimeId))
+        put("key", "reasoning")
+        put("value", normalized)
+      },
+    )
+  }
 
   override suspend fun createSession(): ActiveSession = GatewayProtocol.parseActiveSession(
     rpc.request(
@@ -173,5 +204,6 @@ internal class HermesMobileRuntime(
 
   private companion object {
     val ATTACH_METHODS = setOf("image.attach_bytes", "pdf.attach", "file.attach")
+    val REASONING_EFFORTS = setOf("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
   }
 }

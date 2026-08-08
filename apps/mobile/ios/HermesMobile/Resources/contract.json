@@ -39,6 +39,7 @@
     "session.interrupt",
     "prompt.submit",
     "model.options",
+    "config.set",
     "approval.respond",
     "clarify.respond",
     "secret.respond",
