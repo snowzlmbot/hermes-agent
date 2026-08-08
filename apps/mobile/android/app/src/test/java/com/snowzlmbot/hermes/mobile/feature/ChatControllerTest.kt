@@ -4,6 +4,9 @@ import com.snowzlmbot.hermes.mobile.core.ActiveSession
 import com.snowzlmbot.hermes.mobile.core.ChatMessageRecord
 import com.snowzlmbot.hermes.mobile.core.GatewayEvent
 import com.snowzlmbot.hermes.mobile.core.GatewayEventType
+import com.snowzlmbot.hermes.mobile.core.ModelCatalog
+import com.snowzlmbot.hermes.mobile.core.ModelOption
+import com.snowzlmbot.hermes.mobile.core.ModelProviderOption
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -102,12 +105,35 @@ class ChatControllerTest {
     assertTrue(controller.state.value.sessions.first().pinned)
   }
 
+  @Test
+  fun modelControlsLoadForActiveRuntimeAndUpdateVisibleChatState() = runTest {
+    val runtime = RecordingRuntime()
+    val controller = ChatController(runtime, backgroundScope)
+    controller.connect()
+    controller.newSession()
+
+    controller.refreshModelOptions()
+    val option = controller.state.value.modelCatalog.providers.single().models.single()
+    controller.selectModel(option)
+    controller.setReasoningEffort("high")
+
+    assertEquals(listOf("runtime-new"), runtime.modelOptionsRequests)
+    assertEquals(listOf("runtime-new" to ("fixture" to "fixture-model")), runtime.modelSelections)
+    assertEquals(listOf("runtime-new" to "high"), runtime.reasoningSelections)
+    assertEquals("fixture-model", controller.state.value.chat.model)
+    assertEquals("fixture", controller.state.value.chat.provider)
+    assertEquals("high", controller.state.value.chat.reasoningEffort)
+  }
+
   private class RecordingRuntime : MobileGatewayRuntime {
     override val events = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 8)
     val resumed = mutableListOf<String>()
     val prompts = mutableListOf<Pair<String, String>>()
     val interrupted = mutableListOf<String>()
     val pinnedUpdates = mutableListOf<Pair<String, Boolean>>()
+    val modelOptionsRequests = mutableListOf<String>()
+    val modelSelections = mutableListOf<Pair<String, Pair<String, String>>>()
+    val reasoningSelections = mutableListOf<Pair<String, String>>()
     var listedSessions = listOf(summary("stored-1"))
     var sessionListRequests = 0
     var failPrompts = false
@@ -133,6 +159,36 @@ class ChatControllerTest {
 
     override suspend fun interrupt(runtimeId: String) {
       interrupted += runtimeId
+    }
+
+    override suspend fun listModelOptions(runtimeId: String): ModelCatalog {
+      modelOptionsRequests += runtimeId
+      return ModelCatalog(
+        currentModel = "fixture-model",
+        currentProvider = "fixture",
+        providers = listOf(
+          ModelProviderOption(
+            id = "fixture",
+            name = "Fixture",
+            models = listOf(
+              ModelOption(
+                providerId = "fixture",
+                providerName = "Fixture",
+                id = "fixture-model",
+                supportsReasoning = true,
+              ),
+            ),
+          ),
+        ),
+      )
+    }
+
+    override suspend fun selectModel(runtimeId: String, provider: String, model: String) {
+      modelSelections += runtimeId to (provider to model)
+    }
+
+    override suspend fun setReasoningEffort(runtimeId: String, effort: String) {
+      reasoningSelections += runtimeId to effort
     }
 
     override suspend fun updateSession(

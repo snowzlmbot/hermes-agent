@@ -162,6 +162,26 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(model.selectedProviderID, "nous")
         XCTAssertEqual(model.reasoningEffort, "max")
     }
+
+    func testLoadsModelCatalogForActiveRuntime() async throws {
+        let socket = RecordingSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport)
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        try await model.loadModelOptions()
+
+        XCTAssertEqual(model.modelCatalog.currentModel, "fixture-model")
+        XCTAssertEqual(model.modelCatalog.currentProvider, "fixture")
+        XCTAssertEqual(model.modelCatalog.providers.map(\.id), ["fixture"])
+        XCTAssertEqual(model.modelCatalog.providers.single?.models.map(\.modelID), ["fixture-model", "fixture-fast"])
+        XCTAssertEqual(model.modelCatalog.providers.single?.models.last?.supportsFast, true)
+        let requests = await socket.requests
+        XCTAssertEqual(requests.map(\.method), [GatewayMethod.modelOptions])
+        XCTAssertEqual(requests.first?.params?["session_id"], .string("runtime-1"))
+    }
 }
 
 private actor RecordingSocket: GatewaySocket {
@@ -172,8 +192,29 @@ private actor RecordingSocket: GatewaySocket {
     func send(_ data: Data) async throws {
         let request = try JSONDecoder().decode(JSONRPCRequest.self, from: data)
         requests.append(request)
+        let result: JSONValue
+        if request.method == GatewayMethod.modelOptions {
+            result = .object([
+                "model": .string("fixture-model"),
+                "provider": .string("fixture"),
+                "providers": .array([
+                    .object([
+                        "slug": .string("fixture"),
+                        "name": .string("Fixture"),
+                        "authenticated": .bool(true),
+                        "models": .array([.string("fixture-model"), .string("fixture-fast")]),
+                        "capabilities": .object([
+                            "fixture-model": .object(["fast": .bool(false), "reasoning": .bool(true)]),
+                            "fixture-fast": .object(["fast": .bool(true), "reasoning": .bool(true)])
+                        ])
+                    ])
+                ])
+            ])
+        } else {
+            result = .object(["status": .string("ok")])
+        }
         let response = try JSONEncoder().encode(
-            JSONRPCResponse(id: request.id, result: .object(["status": .string("ok")]))
+            JSONRPCResponse(id: request.id, result: result)
         )
         if let waiter = waiters.first {
             waiters.removeFirst()
