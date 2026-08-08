@@ -46,10 +46,10 @@ targets:
       - path: HermesMobile
         excludes:
           - Resources
-    resources:
       - path: HermesMobile/Resources
         excludes:
           - Info.plist
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.snowzlmbot.hermes.mobile
@@ -68,10 +68,6 @@ targets:
       - path: HermesMobileTests
         excludes:
           - Info.plist
-    resources:
-      - path: HermesMobile/Resources/contract.json
-      - path: HermesMobile/Resources/en.lproj
-      - path: HermesMobile/Resources/zh-Hans.lproj
     dependencies:
       - target: HermesMobile
     settings:
