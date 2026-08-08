@@ -10934,6 +10934,49 @@ def test_session_list_returns_clean_error_when_state_db_is_unavailable(monkeypat
     assert "state.db unavailable: locking protocol" in resp["error"]["message"]
 
 
+def test_session_list_exposes_durable_mobile_flags(monkeypatch):
+    captured = {}
+
+    class _DB:
+        def list_sessions_rich(self, **kwargs):
+            captured.update(kwargs)
+            return [
+                {
+                    "id": "stored-1",
+                    "title": "Pinned session",
+                    "preview": "Ready",
+                    "started_at": 10,
+                    "last_active": 20,
+                    "message_count": 2,
+                    "source": "mobile",
+                    "archived": False,
+                    "pinned": True,
+                }
+            ]
+
+    monkeypatch.setattr(server, "_get_db", lambda: _DB())
+
+    resp = server.handle_request(
+        {"id": "1", "method": "session.list", "params": {"limit": 20}}
+    )
+
+    assert "result" in resp, resp
+    assert captured["include_pinned"] is True
+    assert resp["result"]["sessions"] == [
+        {
+            "id": "stored-1",
+            "title": "Pinned session",
+            "preview": "Ready",
+            "started_at": 10,
+            "last_active": 20,
+            "message_count": 2,
+            "source": "mobile",
+            "archived": False,
+            "pinned": True,
+        }
+    ]
+
+
 # --------------------------------------------------------------------------
 # session.delete — TUI resume picker `d` key
 # --------------------------------------------------------------------------

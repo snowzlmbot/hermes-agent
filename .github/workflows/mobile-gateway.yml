@@ -8,7 +8,9 @@ on:
     paths:
       - hermes_cli/dashboard_auth/**
       - hermes_cli/web_server.py
+      - tui_gateway/methods_session.py
       - tests/hermes_cli/test_dashboard_auth_native_flow.py
+      - tests/test_tui_gateway_server.py
       - .github/workflows/mobile-gateway.yml
 
 permissions:
@@ -52,4 +54,5 @@ jobs:
         run: >-
           uv run python -m pytest
           tests/hermes_cli/test_dashboard_auth_native_flow.py
+          tests/test_tui_gateway_server.py::test_session_list_exposes_durable_mobile_flags
           -q --tb=short
