@@ -77,6 +77,44 @@ class GatewayProtocolTest {
   }
 
   @Test
+  fun parsesAuthenticatedModelCatalogAndPerModelCapabilities() {
+    val catalog = GatewayProtocol.parseModelOptions(
+      jsonObject(
+        """{
+          "model":"hermes-4",
+          "provider":"nous",
+          "providers":[
+            {
+              "slug":"nous",
+              "name":"Nous",
+              "authenticated":true,
+              "models":["hermes-4","hermes-4-fast"],
+              "capabilities":{
+                "hermes-4":{"fast":false,"reasoning":true},
+                "hermes-4-fast":{"fast":true,"reasoning":true}
+              }
+            },
+            {
+              "slug":"anthropic",
+              "name":"Anthropic",
+              "authenticated":false,
+              "models":["claude-sonnet"]
+            }
+          ]
+        }""",
+      ),
+    )
+
+    assertEquals("hermes-4", catalog.currentModel)
+    assertEquals("nous", catalog.currentProvider)
+    assertEquals(listOf("nous"), catalog.providers.map { it.id })
+    assertEquals(listOf("hermes-4", "hermes-4-fast"), catalog.providers.single().models.map { it.id })
+    assertTrue(catalog.providers.single().models.first().supportsReasoning)
+    assertFalse(catalog.providers.single().models.first().supportsFast)
+    assertTrue(catalog.providers.single().models.last().supportsFast)
+  }
+
+  @Test
   fun rejectsMalformedFramesAndNeverIncludesRpcPayloadInExceptionText() {
     assertThrows(ProtocolException::class.java) {
       JsonRpcCodec.decode("[]")

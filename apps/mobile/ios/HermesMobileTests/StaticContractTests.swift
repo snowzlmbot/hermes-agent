@@ -12,6 +12,7 @@ final class StaticContractTests: XCTestCase {
             GatewayMethod.sessionInterrupt,
             GatewayMethod.promptSubmit,
             GatewayMethod.modelOptions,
+            GatewayMethod.configSet,
             GatewayMethod.approvalRespond,
             GatewayMethod.clarifyRespond,
             GatewayMethod.secretRespond,

@@ -6,6 +6,7 @@ import com.snowzlmbot.hermes.mobile.core.SessionSummary
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
@@ -74,6 +75,28 @@ class HermesMobileRuntimeTest {
     assertEquals("@file:.hermes/desktop-attachments/notes.txt", reference)
   }
 
+  @Test
+  fun modelAndReasoningControlsStayScopedToRuntimeSession() = runTest {
+    val rpc = RecordingRpc()
+    val runtime = HermesMobileRuntime(rpc, FakeSessionSource())
+
+    val catalog = runtime.listModelOptions("runtime-1")
+    runtime.selectModel("runtime-1", provider = "nous", model = "hermes-4")
+    runtime.setReasoningEffort("runtime-1", "max")
+
+    assertEquals("hermes-4", catalog.currentModel)
+    assertEquals("model.options", rpc.calls[0].first)
+    assertEquals("runtime-1", rpc.calls[0].second.string("session_id"))
+    assertEquals("config.set", rpc.calls[1].first)
+    assertEquals("runtime-1", rpc.calls[1].second.string("session_id"))
+    assertEquals("model", rpc.calls[1].second.string("key"))
+    assertEquals("hermes-4 --provider nous --session", rpc.calls[1].second.string("value"))
+    assertEquals("config.set", rpc.calls[2].first)
+    assertEquals("runtime-1", rpc.calls[2].second.string("session_id"))
+    assertEquals("reasoning", rpc.calls[2].second.string("key"))
+    assertEquals("max", rpc.calls[2].second.string("value"))
+  }
+
   private class RecordingRpc : JsonObjectRpcClient {
     override val events = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 8)
     val calls = mutableListOf<Pair<String, JsonObject>>()
@@ -88,6 +111,9 @@ class HermesMobileRuntimeTest {
         "file.attach" -> buildJsonObject {
           put("ref_text", "@file:.hermes/desktop-attachments/notes.txt")
         }
+        "model.options" -> Json.parseToJsonElement(
+          """{"model":"hermes-4","provider":"nous","providers":[{"slug":"nous","name":"Nous","authenticated":true,"models":["hermes-4"],"capabilities":{"hermes-4":{"fast":false,"reasoning":true}}}]}""",
+        ) as JsonObject
         else -> buildJsonObject { put("ok", true) }
       }
     }

@@ -127,6 +127,41 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(requests[2].params, ["request_id": .string("secret-1"), "value": .string("hidden")])
         XCTAssertEqual(requests[3].params, ["request_id": .string("sudo-1"), "password": .string("hidden")])
     }
+
+    func testModelAndReasoningControlsStayScopedToRuntimeSession() async throws {
+        let socket = RecordingSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport)
+        let selection = ModelOption(
+            providerID: "nous",
+            providerName: "Nous",
+            modelID: "hermes-4",
+            supportsFast: false,
+            supportsReasoning: true
+        )
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        try await model.selectModel(selection)
+        try await model.setReasoningEffort("max")
+
+        let requests = await socket.requests
+        XCTAssertEqual(requests.map(\.method), [GatewayMethod.configSet, GatewayMethod.configSet])
+        XCTAssertEqual(requests[0].params, [
+            "session_id": .string("runtime-1"),
+            "key": .string("model"),
+            "value": .string("hermes-4 --provider nous --session")
+        ])
+        XCTAssertEqual(requests[1].params, [
+            "session_id": .string("runtime-1"),
+            "key": .string("reasoning"),
+            "value": .string("max")
+        ])
+        XCTAssertEqual(model.selectedModelID, "hermes-4")
+        XCTAssertEqual(model.selectedProviderID, "nous")
+        XCTAssertEqual(model.reasoningEffort, "max")
+    }
 }
 
 private actor RecordingSocket: GatewaySocket {
