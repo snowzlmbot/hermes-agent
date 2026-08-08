@@ -41,4 +41,20 @@ final class SessionMutationTests: XCTestCase {
             ["title": "Roadmap", "pinned": true] as NSDictionary
         )
     }
+
+    func testDeleteRequestUsesStoredSessionIDAndNeverPlacesCredentialsInURL() throws {
+        let endpoint = try GatewayEndpoint(rawValue: "https://gateway.example.com/hermes")
+        let request = try GatewayRESTRequestBuilder.deleteSessionRequest(
+            endpoint: endpoint,
+            auth: .token("test-token"),
+            storedID: "stored-3"
+        )
+
+        XCTAssertEqual(request.httpMethod, "DELETE")
+        XCTAssertEqual(request.url?.absoluteString, "https://gateway.example.com/hermes/api/sessions/stored-3")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Hermes-Session-Token"), "test-token")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+        XCTAssertNil(request.httpBody)
+        XCTAssertFalse(try XCTUnwrap(request.url?.absoluteString).contains("test-token"))
+    }
 }

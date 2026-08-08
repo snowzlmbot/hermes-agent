@@ -20,7 +20,7 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(requests[1].params?["session_id"], .string("runtime-1"))
     }
 
-    func testSessionDeleteUsesStoredIdentityWhileTitleUsesRuntimeIdentity() async throws {
+    func testCurrentSessionTitleUsesRuntimeIdentity() async throws {
         let socket = RecordingSocket()
         let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
         let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
@@ -29,11 +29,10 @@ final class ChatModelTests: XCTestCase {
         try await model.connect()
         model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
         try await model.renameCurrentSession("Roadmap")
-        try await model.delete(storedSessionID: "stored-2")
 
         let requests = await socket.requests
+        XCTAssertEqual(requests.map(\.method), [GatewayMethod.sessionTitle])
         XCTAssertEqual(requests[0].params?["session_id"], .string("runtime-1"))
-        XCTAssertEqual(requests[1].params?["session_id"], .string("stored-2"))
     }
 
     func testInjectedArchiveStoreCanHideSessionWithoutSocketTraffic() async throws {
@@ -65,6 +64,22 @@ final class ChatModelTests: XCTestCase {
         let mutations = await archive.mutations
         let requests = await socket.requests
         XCTAssertEqual(mutations, [.init(storedID: "stored-1", title: nil, archived: true, pinned: nil)])
+        XCTAssertTrue(requests.isEmpty)
+    }
+
+    func testRemoteDeleteUsesDurableSessionMutationClient() async throws {
+        let socket = RecordingSocket()
+        let archive = RecordingSessionMutationClient()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport, sessionMutationClient: archive)
+
+        try await model.connect()
+        try await model.delete(storedSessionID: "stored-2")
+
+        let deletions = await archive.deletedIDs
+        let requests = await socket.requests
+        XCTAssertEqual(deletions, ["stored-2"])
         XCTAssertTrue(requests.isEmpty)
     }
 
@@ -128,8 +143,13 @@ private actor RecordingSocket: GatewaySocket {
 
 private actor RecordingSessionMutationClient: SessionMutationClient {
     var mutations: [SessionMutation] = []
+    var deletedIDs: [String] = []
 
     func patchSession(_ mutation: SessionMutation) async throws {
         mutations.append(mutation)
+    }
+
+    func deleteSession(_ storedID: String) async throws {
+        deletedIDs.append(storedID)
     }
 }
