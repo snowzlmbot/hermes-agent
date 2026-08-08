@@ -68,6 +68,10 @@ targets:
       - path: HermesMobileTests
         excludes:
           - Info.plist
+    resources:
+      - path: HermesMobile/Resources/contract.json
+      - path: HermesMobile/Resources/en.lproj
+      - path: HermesMobile/Resources/zh-Hans.lproj
     dependencies:
       - target: HermesMobile
     settings:
