@@ -176,8 +176,8 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(model.modelCatalog.currentModel, "fixture-model")
         XCTAssertEqual(model.modelCatalog.currentProvider, "fixture")
         XCTAssertEqual(model.modelCatalog.providers.map(\.id), ["fixture"])
-        XCTAssertEqual(model.modelCatalog.providers.single?.models.map(\.modelID), ["fixture-model", "fixture-fast"])
-        XCTAssertEqual(model.modelCatalog.providers.single?.models.last?.supportsFast, true)
+        XCTAssertEqual(model.modelCatalog.providers.first?.models.map(\.modelID), ["fixture-model", "fixture-fast"])
+        XCTAssertEqual(model.modelCatalog.providers.first?.models.last?.supportsFast, true)
         let requests = await socket.requests
         XCTAssertEqual(requests.map(\.method), [GatewayMethod.modelOptions])
         XCTAssertEqual(requests.first?.params?["session_id"], .string("runtime-1"))
