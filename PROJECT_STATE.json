@@ -1,0 +1,74 @@
+{
+  "schema": "zlmaionebot.project-state.v1",
+  "schemaVersion": 1,
+  "project": {
+    "id": "hermes-mobile",
+    "name": "Hermes Mobile",
+    "root": ".",
+    "purpose": "Native iOS and Android clients for Hermes gateway sessions and agent workflows."
+  },
+  "revision": 6,
+  "phase": "executing",
+  "updatedAt": "2026-08-08T17:11:48Z",
+  "updatedBy": {
+    "runtime": "hermes",
+    "profile": "default",
+    "actor": "ZLMAIonebot"
+  },
+  "goal": "Deliver production-ready native mobile clients with secure connectivity, session management, streaming chat, model controls, tools, prompts, media, voice, notifications, localization, and adaptive layouts.",
+  "summary": "Action intent checkpointed: Push the focused review regression tests to the dedicated mobile branch to obtain candidate-specific Android and iOS RED evidence before applying the held production fixes.",
+  "done": [
+    "Added native model and reasoning controls, runtime-scoped catalog resets, iOS demo capability data, and focused Android/iOS regression tests.",
+    "Bound model capability rendering to confirmed runtime state and restored graph-output ignore rules.",
+    "Added unknown-model capability guarding on Android and type-independent XCTest lookup for the iOS model controls entry.",
+    "Verified production config.set can return confirm_required without applying a high-cost model switch."
+  ],
+  "inProgress": [
+    {
+      "id": "mobile-candidate-push-v1",
+      "summary": "Commit and push the verified native mobile model-controls candidate to the dedicated branch for remote Android and iOS validation.",
+      "status": "in_progress",
+      "sideEffect": "external",
+      "idempotencyKey": "hermes-agent-Mobile-app:model-controls:v1",
+      "ownerRuntime": "hermes",
+      "startedAt": "2026-08-08T16:01:08Z",
+      "verify": "Read back origin/hermes-agent-Mobile-app SHA, then require candidate-specific Mobile and Mobile Android workflow runs with matching headSha and inspect their completed jobs and artifacts.",
+      "evidence": []
+    },
+    {
+      "id": "mobile-review-red-v1",
+      "summary": "Push the focused review regression tests to the dedicated mobile branch to obtain candidate-specific Android and iOS RED evidence before applying the held production fixes.",
+      "status": "in_progress",
+      "sideEffect": "external",
+      "idempotencyKey": "hermes-agent-Mobile-app:model-controls-review-red:v1",
+      "ownerRuntime": "hermes",
+      "startedAt": "2026-08-08T17:11:48Z",
+      "verify": "Read back the dedicated branch SHA and inspect Mobile plus Mobile Android workflow runs for that exact headSha; require failures to originate from the newly required confirmation, refresh, or generation APIs rather than unrelated infrastructure.",
+      "evidence": []
+    }
+  ],
+  "next": [
+    "Add Android and iOS RED tests for confirmation-required model switches, implement explicit confirmation callbacks, then re-run independent review before push."
+  ],
+  "blockers": [],
+  "decisions": [],
+  "evidence": [],
+  "verification": {
+    "status": "partial",
+    "summary": "Static source/resource checks, localization parity, secret scan, diff checks, remote baseline match, and reasoning-contract parity passed; compilation and tests remain deferred to GitHub Actions.",
+    "checkedAt": "2026-08-08T15:46:34Z"
+  },
+  "checkpoint": {
+    "id": "cp-000006",
+    "sequence": 6,
+    "reason": "action_begin:mobile-review-red-v1",
+    "at": "2026-08-08T17:11:48Z"
+  },
+  "recovery": {
+    "resumeHint": "Validate project state, read back origin/hermes-agent-Mobile-app before retrying, and inspect exact-headSha workflow logs for the RED candidate.",
+    "lastSafeCheckpoint": "cp-000006",
+    "interrupted": false,
+    "interruptionReason": null,
+    "requiresRevalidation": true
+  }
+}

@@ -139,7 +139,12 @@ internal class ChatController(
 
   suspend fun newSession() {
     try {
-      mutableState.value = mutableState.value.copy(chat = runtime.createSession().toChatState(), error = null)
+      mutableState.value = mutableState.value.copy(
+        chat = runtime.createSession().toChatState(),
+        modelCatalog = ModelCatalog(),
+        isLoadingModelOptions = false,
+        error = null,
+      )
     } catch (error: Throwable) {
       mutableState.value = mutableState.value.copy(error = error.toUiError())
     }
@@ -148,7 +153,12 @@ internal class ChatController(
   suspend fun openSession(storedId: String) {
     if (storedId.isBlank()) return
     try {
-      mutableState.value = mutableState.value.copy(chat = runtime.resumeSession(storedId).toChatState(), error = null)
+      mutableState.value = mutableState.value.copy(
+        chat = runtime.resumeSession(storedId).toChatState(),
+        modelCatalog = ModelCatalog(),
+        isLoadingModelOptions = false,
+        error = null,
+      )
     } catch (error: Throwable) {
       mutableState.value = mutableState.value.copy(error = error.toUiError())
     }

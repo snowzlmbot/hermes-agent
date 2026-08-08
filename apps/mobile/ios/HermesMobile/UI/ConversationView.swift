@@ -11,6 +11,7 @@ struct ConversationView: View {
     @State private var showingPhotoPicker = false
     @State private var showingImporter = false
     @State private var showingSettings = false
+    @State private var showingModelControls = false
     @State private var audioModel = AudioInteractionModel()
 
     private var chat: ChatModel? { appModel.chatModel }
@@ -44,6 +45,18 @@ struct ConversationView: View {
                 .navigationTitle(navigationTitleOverride ?? sessionTitle(chat: chat))
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            showingModelControls = true
+                        } label: {
+                            Label(
+                                String(localized: "model.controls.title"),
+                                systemImage: "slider.horizontal.3"
+                            )
+                            .labelStyle(.iconOnly)
+                        }
+                        .accessibilityIdentifier("Model controls")
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button {
@@ -82,6 +95,9 @@ struct ConversationView: View {
                 ) { result in
                     guard case .success(let urls) = result, let url = urls.first else { return }
                     Task { await appModel.attachFile(url: url) }
+                }
+                .sheet(isPresented: $showingModelControls) {
+                    ModelControlsSheet(chat: chat)
                 }
                 .sheet(isPresented: $showingSettings) {
                     ConnectionSummarySheet(profile: appModel.profile)

@@ -97,9 +97,40 @@ class HermesMobileRuntimeTest {
     assertEquals("max", rpc.calls[2].second.string("value"))
   }
 
+  @Test
+  fun modelOptionsRefreshCarriesExplicitRefreshFlag() = runTest {
+    val rpc = RecordingRpc()
+    val runtime = HermesMobileRuntime(rpc, FakeSessionSource())
+
+    runtime.listModelOptions("runtime-1", refresh = true)
+
+    assertEquals(true, rpc.calls.single().second.boolean("refresh"))
+  }
+
+  @Test
+  fun modelSelectionRequiresExplicitConfirmationBeforeApplying() = runTest {
+    val rpc = RecordingRpc().apply { requireModelConfirmation = true }
+    val runtime = HermesMobileRuntime(rpc, FakeSessionSource())
+
+    val pending = runtime.selectModel("runtime-1", provider = "nous", model = "expensive-model")
+    assertEquals(ModelSwitchResult.ConfirmationRequired("Confirm expensive model"), pending)
+    assertEquals(null, rpc.calls.single().second.boolean("confirm_expensive_model"))
+
+    rpc.requireModelConfirmation = false
+    val applied = runtime.selectModel(
+      "runtime-1",
+      provider = "nous",
+      model = "expensive-model",
+      confirmExpensiveModel = true,
+    )
+    assertEquals(ModelSwitchResult.Applied, applied)
+    assertEquals(true, rpc.calls[1].second.boolean("confirm_expensive_model"))
+  }
+
   private class RecordingRpc : JsonObjectRpcClient {
     override val events = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 8)
     val calls = mutableListOf<Pair<String, JsonObject>>()
+    var requireModelConfirmation = false
 
     override suspend fun connect() = Unit
 
@@ -114,6 +145,14 @@ class HermesMobileRuntimeTest {
         "model.options" -> Json.parseToJsonElement(
           """{"model":"hermes-4","provider":"nous","providers":[{"slug":"nous","name":"Nous","authenticated":true,"models":["hermes-4"],"capabilities":{"hermes-4":{"fast":false,"reasoning":true}}}]}""",
         ) as JsonObject
+        "config.set" -> if (params.string("key") == "model" && requireModelConfirmation) {
+          buildJsonObject {
+            put("confirm_required", true)
+            put("confirm_message", "Confirm expensive model")
+          }
+        } else {
+          buildJsonObject { put("ok", true) }
+        }
         else -> buildJsonObject { put("ok", true) }
       }
     }
@@ -136,3 +175,6 @@ class HermesMobileRuntimeTest {
 
 private fun JsonObject.string(key: String): String =
   (this[key] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+
+private fun JsonObject.boolean(key: String): Boolean? =
+  (this[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull()

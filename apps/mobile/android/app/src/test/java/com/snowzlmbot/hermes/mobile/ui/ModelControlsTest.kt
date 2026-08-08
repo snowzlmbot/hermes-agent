@@ -1,6 +1,11 @@
 package com.snowzlmbot.hermes.mobile.ui
 
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -21,7 +26,36 @@ class ModelControlsTest {
   val compose = createComposeRule()
 
   @Test
-  fun selectsModelAndShowsReasoningOnlyForCapableSelection() {
+  fun selectsModelAndShowsReasoningOnlyAfterConfirmedSelection() {
+    val selections = mutableListOf<String>()
+    compose.setContent {
+      MaterialTheme {
+        var currentModel by remember { mutableStateOf("fixture-model") }
+        ModelControls(
+          catalog = catalog,
+          currentModel = currentModel,
+          currentProvider = "fixture",
+          reasoningEffort = "medium",
+          isLoading = false,
+          onRefresh = {},
+          onSelectModel = {
+            selections += it.id
+            currentModel = it.id
+          },
+          onSetReasoningEffort = {},
+        )
+      }
+    }
+
+    compose.onNodeWithTag("reasoning-picker").assertDoesNotExist()
+    compose.onNodeWithTag("model-picker").assertIsDisplayed().performClick()
+    compose.onNodeWithText("fixture-fast", substring = true).assertIsDisplayed().performClick()
+    compose.onNodeWithTag("reasoning-picker").assertIsDisplayed()
+    assertEquals(listOf("fixture-fast"), selections)
+  }
+
+  @Test
+  fun keepsCapabilitiesBoundToCurrentModelUntilParentConfirmsSelection() {
     val selections = mutableListOf<String>()
     compose.setContent {
       MaterialTheme {
@@ -38,10 +72,32 @@ class ModelControlsTest {
       }
     }
 
-    compose.onNodeWithTag("model-picker").assertIsDisplayed().performClick()
-    compose.onNodeWithText("fixture-fast").assertIsDisplayed().performClick()
-    compose.onNodeWithTag("reasoning-picker").assertIsDisplayed()
+    compose.onNodeWithTag("model-picker").performClick()
+    compose.onNodeWithText("fixture-fast", substring = true).performClick()
+    compose.onNodeWithTag("reasoning-picker").assertDoesNotExist()
     assertEquals(listOf("fixture-fast"), selections)
+  }
+
+  @Test
+  fun doesNotClaimCatalogCapabilityWhenCurrentModelIsUnknown() {
+    compose.setContent {
+      MaterialTheme {
+        ModelControls(
+          catalog = catalog,
+          currentModel = "remote-only-model",
+          currentProvider = "remote-provider",
+          reasoningEffort = "high",
+          isLoading = false,
+          onRefresh = {},
+          onSelectModel = {},
+          onSetReasoningEffort = {},
+        )
+      }
+    }
+
+    compose.onNodeWithTag("model-picker").assertIsDisplayed()
+    compose.onNodeWithText("Select model").assertIsDisplayed()
+    compose.onNodeWithTag("reasoning-picker").assertDoesNotExist()
   }
 
   private companion object {

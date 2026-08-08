@@ -32,6 +32,11 @@
 "message.hermes" = "Hermes";
 "message.reasoning" = "Reasoning";
 "message.thinking" = "Thinking...";
+"model.controls.title" = "Model controls";
+"model.controls.model" = "Model";
+"model.controls.reasoning" = "Reasoning";
+"model.controls.none" = "No models are available for this session.";
+"model.controls.reasoning.unavailable" = "Reasoning controls are unavailable for this model.";
 "tool.generic" = "Tool";
 "tool.running" = "Running";
 "tool.complete" = "Complete";

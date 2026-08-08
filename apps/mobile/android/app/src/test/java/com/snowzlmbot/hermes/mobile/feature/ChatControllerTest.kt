@@ -8,7 +8,9 @@ import com.snowzlmbot.hermes.mobile.core.ModelCatalog
 import com.snowzlmbot.hermes.mobile.core.ModelOption
 import com.snowzlmbot.hermes.mobile.core.ModelProviderOption
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.runCurrent
@@ -125,6 +127,85 @@ class ChatControllerTest {
     assertEquals("high", controller.state.value.chat.reasoningEffort)
   }
 
+  @Test
+  fun switchingSessionsClearsModelCatalogAndLoadingState() = runTest {
+    val runtime = RecordingRuntime()
+    val controller = ChatController(runtime, backgroundScope)
+    controller.connect()
+    controller.newSession()
+    controller.refreshModelOptions()
+
+    assertTrue(controller.state.value.modelCatalog.providers.isNotEmpty())
+    controller.openSession("stored-1")
+
+    assertEquals("runtime-resumed", controller.state.value.chat.runtimeSessionId)
+    assertTrue(controller.state.value.modelCatalog.providers.isEmpty())
+    assertFalse(controller.state.value.isLoadingModelOptions)
+  }
+
+  @Test
+  fun confirmationRequiredDoesNotChangeModelUntilExplicitlyConfirmed() = runTest {
+    val runtime = RecordingRuntime().apply {
+      modelSwitchResult = ModelSwitchResult.ConfirmationRequired("Confirm expensive model")
+    }
+    val controller = ChatController(runtime, backgroundScope)
+    controller.connect()
+    controller.newSession()
+    controller.refreshModelOptions()
+    val option = ModelOption(
+      providerId = "fixture",
+      providerName = "Fixture",
+      id = "expensive-model",
+      supportsReasoning = true,
+    )
+
+    controller.selectModel(option)
+
+    assertEquals("fixture-model", controller.state.value.chat.model)
+    assertEquals(option, controller.state.value.pendingModelConfirmation?.option)
+    assertEquals("Confirm expensive model", controller.state.value.pendingModelConfirmation?.message)
+
+    runtime.modelSwitchResult = ModelSwitchResult.Applied
+    controller.confirmModelSelection()
+
+    assertEquals("expensive-model", controller.state.value.chat.model)
+    assertEquals(null, controller.state.value.pendingModelConfirmation)
+    assertEquals(listOf(false, true), runtime.modelSelectionConfirmations)
+  }
+
+  @Test
+  fun slowerEarlierResumeCannotOverwriteNewerSessionSelection() = runTest {
+    val runtime = RecordingRuntime().apply { delayResumes = true }
+    val controller = ChatController(runtime, backgroundScope)
+    controller.connect()
+
+    val first = async { controller.openSession("stored-1") }
+    runCurrent()
+    val second = async { controller.openSession("stored-2") }
+    runCurrent()
+
+    runtime.completeResume("stored-2", "runtime-2")
+    runCurrent()
+    runtime.completeResume("stored-1", "runtime-1")
+    first.await()
+    second.await()
+
+    assertEquals("stored-2", controller.state.value.chat.storedSessionId)
+    assertEquals("runtime-2", controller.state.value.chat.runtimeSessionId)
+  }
+
+  @Test
+  fun manualRefreshForcesProviderProbe() = runTest {
+    val runtime = RecordingRuntime()
+    val controller = ChatController(runtime, backgroundScope)
+    controller.connect()
+    controller.newSession()
+
+    controller.refreshModelOptions(forceRefresh = true)
+
+    assertEquals(listOf(true), runtime.modelOptionRefreshes)
+  }
+
   private class RecordingRuntime : MobileGatewayRuntime {
     override val events = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 8)
     val resumed = mutableListOf<String>()
@@ -132,11 +213,16 @@ class ChatControllerTest {
     val interrupted = mutableListOf<String>()
     val pinnedUpdates = mutableListOf<Pair<String, Boolean>>()
     val modelOptionsRequests = mutableListOf<String>()
+    val modelOptionRefreshes = mutableListOf<Boolean>()
     val modelSelections = mutableListOf<Pair<String, Pair<String, String>>>()
+    val modelSelectionConfirmations = mutableListOf<Boolean>()
     val reasoningSelections = mutableListOf<Pair<String, String>>()
     var listedSessions = listOf(summary("stored-1"))
     var sessionListRequests = 0
     var failPrompts = false
+    var modelSwitchResult: ModelSwitchResult = ModelSwitchResult.Applied
+    var delayResumes = false
+    private val pendingResumes = mutableMapOf<String, CompletableDeferred<ActiveSession>>()
 
     override suspend fun connect() = Unit
 
@@ -149,7 +235,15 @@ class ChatControllerTest {
 
     override suspend fun resumeSession(storedId: String): ActiveSession {
       resumed += storedId
+      if (delayResumes) {
+        return pendingResumes.getOrPut(storedId) { CompletableDeferred() }.await()
+      }
       return active("runtime-resumed", storedId)
+    }
+
+    fun completeResume(storedId: String, runtimeId: String) {
+      pendingResumes.getOrPut(storedId) { CompletableDeferred() }
+        .complete(active(runtimeId, storedId))
     }
 
     override suspend fun submitPrompt(runtimeId: String, text: String) {
@@ -161,8 +255,9 @@ class ChatControllerTest {
       interrupted += runtimeId
     }
 
-    override suspend fun listModelOptions(runtimeId: String): ModelCatalog {
+    override suspend fun listModelOptions(runtimeId: String, refresh: Boolean): ModelCatalog {
       modelOptionsRequests += runtimeId
+      modelOptionRefreshes += refresh
       return ModelCatalog(
         currentModel = "fixture-model",
         currentProvider = "fixture",
@@ -183,8 +278,15 @@ class ChatControllerTest {
       )
     }
 
-    override suspend fun selectModel(runtimeId: String, provider: String, model: String) {
+    override suspend fun selectModel(
+      runtimeId: String,
+      provider: String,
+      model: String,
+      confirmExpensiveModel: Boolean,
+    ): ModelSwitchResult {
       modelSelections += runtimeId to (provider to model)
+      modelSelectionConfirmations += confirmExpensiveModel
+      return modelSwitchResult
     }
 
     override suspend fun setReasoningEffort(runtimeId: String, effort: String) {

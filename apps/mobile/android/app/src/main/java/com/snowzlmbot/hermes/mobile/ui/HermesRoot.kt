@@ -78,6 +78,7 @@ import com.snowzlmbot.hermes.mobile.app.AppScreen
 import com.snowzlmbot.hermes.mobile.app.AppUiState
 import com.snowzlmbot.hermes.mobile.app.HermesAppViewModel
 import com.snowzlmbot.hermes.mobile.core.MessageRole
+import com.snowzlmbot.hermes.mobile.core.ModelCatalog
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
 import com.snowzlmbot.hermes.mobile.feature.ApprovalPrompt
 import com.snowzlmbot.hermes.mobile.feature.ChatMessage
@@ -245,6 +246,8 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
       } else {
         ChatContent(
           chat = chat,
+          modelCatalog = mobile?.modelCatalog ?: ModelCatalog(),
+          isLoadingModelOptions = mobile?.isLoadingModelOptions == true,
           viewModel = viewModel,
           modifier = Modifier.fillMaxSize().padding(padding),
           onAttach = { showAttachmentMenu = true },
@@ -346,6 +349,8 @@ private fun SessionDrawer(
 @Composable
 private fun ChatContent(
   chat: ChatState,
+  modelCatalog: ModelCatalog,
+  isLoadingModelOptions: Boolean,
   viewModel: HermesAppViewModel,
   modifier: Modifier,
   onAttach: () -> Unit,
@@ -358,6 +363,9 @@ private fun ChatContent(
   LaunchedEffect(chat.messages.size, chat.messages.lastOrNull()?.text) {
     if (chat.messages.isNotEmpty()) listState.animateScrollToItem(chat.messages.lastIndex)
   }
+  LaunchedEffect(chat.runtimeSessionId) {
+    if (chat.runtimeSessionId != null && modelCatalog.providers.isEmpty()) viewModel.refreshModelOptions()
+  }
   Column(modifier.imePadding()) {
     LazyColumn(
       state = listState,
@@ -369,6 +377,17 @@ private fun ChatContent(
       items(chat.tools, key = { it.id }) { tool -> ToolCard(tool) }
       item { PromptCards(chat, viewModel) }
     }
+    ModelControls(
+      catalog = modelCatalog,
+      currentModel = chat.model,
+      currentProvider = chat.provider,
+      reasoningEffort = chat.reasoningEffort,
+      isLoading = isLoadingModelOptions,
+      onRefresh = viewModel::refreshModelOptions,
+      onSelectModel = viewModel::selectModel,
+      onSetReasoningEffort = viewModel::setReasoningEffort,
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+    )
     Composer(
       value = text,
       onValueChange = { text = it },

@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.snowzlmbot.hermes.mobile.core.GatewayAuthMode
 import com.snowzlmbot.hermes.mobile.core.GatewayProfile
+import com.snowzlmbot.hermes.mobile.core.ModelOption
 import com.snowzlmbot.hermes.mobile.core.SecretValue
 import com.snowzlmbot.hermes.mobile.feature.ChatController
 import com.snowzlmbot.hermes.mobile.feature.MobileChatUiState
@@ -93,6 +94,18 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
 
   fun stop() {
     viewModelScope.launch { controller?.stop() }
+  }
+
+  fun refreshModelOptions() {
+    viewModelScope.launch { controller?.refreshModelOptions() }
+  }
+
+  fun selectModel(option: ModelOption) {
+    viewModelScope.launch { controller?.selectModel(option) }
+  }
+
+  fun setReasoningEffort(effort: String) {
+    viewModelScope.launch { controller?.setReasoningEffort(effort) }
   }
 
   fun clearError() {

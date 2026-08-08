@@ -143,7 +143,7 @@ final class ChatModelTests: XCTestCase {
 
         try await model.connect()
         model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
-        try await model.selectModel(selection)
+        _ = try await model.selectModel(selection)
         try await model.setReasoningEffort("max")
 
         let requests = await socket.requests
@@ -161,6 +161,68 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(model.selectedModelID, "hermes-4")
         XCTAssertEqual(model.selectedProviderID, "nous")
         XCTAssertEqual(model.reasoningEffort, "max")
+    }
+
+    func testModelSelectionWaitsForExplicitExpensiveModelConfirmation() async throws {
+        let socket = RecordingSocket(requireModelConfirmation: true)
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport)
+        let selection = ModelOption(
+            providerID: "nous",
+            providerName: "Nous",
+            modelID: "expensive-model",
+            supportsReasoning: true
+        )
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        let pending = try await model.selectModel(selection)
+
+        XCTAssertEqual(pending, .confirmationRequired(message: "Confirm expensive model"))
+        XCTAssertEqual(model.selectedModelID, "")
+        XCTAssertEqual(model.selectedProviderID, "")
+
+        let applied = try await model.selectModel(selection, confirmExpensiveModel: true)
+        XCTAssertEqual(applied, .applied)
+        XCTAssertEqual(model.selectedModelID, "expensive-model")
+        XCTAssertEqual(model.selectedProviderID, "nous")
+        let requests = await socket.requests
+        XCTAssertEqual(requests[0].params?["confirm_expensive_model"], nil)
+        XCTAssertEqual(requests[1].params?["confirm_expensive_model"], .bool(true))
+    }
+
+    func testFailedModelSelectionDoesNotChangeAuthoritativeState() async throws {
+        let socket = RecordingSocket(failConfigSet: true)
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport)
+        let selection = ModelOption(providerID: "nous", providerName: "Nous", modelID: "rejected-model")
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        do {
+            _ = try await model.selectModel(selection)
+            XCTFail("Expected config.set to fail")
+        } catch {
+            XCTAssertEqual(model.selectedModelID, "")
+            XCTAssertEqual(model.selectedProviderID, "")
+        }
+    }
+
+    func testForcedModelRefreshPropagatesRefreshFlag() async throws {
+        let socket = RecordingSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport)
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        try await model.loadModelOptions(refresh: true)
+
+        let requests = await socket.requests
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.params?["refresh"], .bool(true))
     }
 
     func testLoadsModelCatalogForActiveRuntime() async throws {
@@ -182,16 +244,127 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(requests.map(\.method), [GatewayMethod.modelOptions])
         XCTAssertEqual(requests.first?.params?["session_id"], .string("runtime-1"))
     }
+    func testResumeClearsOldCatalogAndAdoptsActiveSessionModelState() async throws {
+        let socket = RecordingSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport)
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        try await model.loadModelOptions()
+        XCTAssertFalse(model.modelCatalog.providers.isEmpty)
+
+        _ = try await model.resume(storedSessionID: "stored-2")
+
+        XCTAssertTrue(model.modelCatalog.providers.isEmpty)
+        XCTAssertEqual(model.modelCatalog.currentModel, "active-model")
+        XCTAssertEqual(model.modelCatalog.currentProvider, "active-provider")
+        XCTAssertEqual(model.selectedModelID, "active-model")
+        XCTAssertEqual(model.selectedProviderID, "active-provider")
+        XCTAssertEqual(model.reasoningEffort, "high")
+    }
+
+    func testSessionInfoSynchronizesModelProviderAndReasoningForActiveRuntime() async throws {
+        let socket = ControlledChatSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport)
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        await socket.pushEvent(
+            GatewayEvent(
+                type: .sessionInfo,
+                sessionID: "runtime-1",
+                payload: .object([
+                    "model": .string("event-model"),
+                    "provider": .string("event-provider"),
+                    "reasoning_effort": .string("ultra")
+                ])
+            )
+        )
+        for _ in 0..<50 {
+            if model.selectedModelID == "event-model" { break }
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.selectedModelID, "event-model")
+        XCTAssertEqual(model.selectedProviderID, "event-provider")
+        XCTAssertEqual(model.reasoningEffort, "ultra")
+        XCTAssertEqual(model.modelCatalog.currentModel, "event-model")
+        XCTAssertEqual(model.modelCatalog.currentProvider, "event-provider")
+    }
+
+    func testSlowerEarlierResumeCannotOverwriteNewerSessionSelection() async throws {
+        let socket = ControlledChatSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport)
+
+        try await model.connect()
+        let first = Task { try await model.resume(storedSessionID: "stored-1") }
+        let second = Task { try await model.resume(storedSessionID: "stored-2") }
+        let requests = await socket.waitForRequests(count: 2)
+        let firstRequest = try XCTUnwrap(requests.first { $0.params?["session_id"] == .string("stored-1") })
+        let secondRequest = try XCTUnwrap(requests.first { $0.params?["session_id"] == .string("stored-2") })
+
+        await socket.pushResponse(
+            id: secondRequest.id,
+            result: activeSessionResult(runtimeID: "runtime-2", storedID: "stored-2")
+        )
+        _ = try await second.value
+        await socket.pushResponse(
+            id: firstRequest.id,
+            result: activeSessionResult(runtimeID: "runtime-1", storedID: "stored-1")
+        )
+        _ = try await first.value
+
+        XCTAssertEqual(model.state.storedSessionID, "stored-2")
+        XCTAssertEqual(model.state.runtimeSessionID, "runtime-2")
+    }
+
+    func testDemoSeedProvidesModelControlsCatalog() throws {
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("demo"), socketFactory: { _ in
+            fatalError("demo transport must not open a socket")
+        })
+        let model = ChatModel(transport: transport)
+
+        model.seedDemo()
+
+        let option = try XCTUnwrap(model.modelCatalog.providers.first?.models.first)
+        XCTAssertEqual(model.selectedModelID, option.modelID)
+        XCTAssertEqual(model.selectedProviderID, option.providerID)
+        XCTAssertTrue(option.supportsReasoning)
+    }
 }
 
 private actor RecordingSocket: GatewaySocket {
     var requests: [JSONRPCRequest] = []
     private var responses: [Data] = []
     private var waiters: [CheckedContinuation<Data, Error>] = []
+    private let requireModelConfirmation: Bool
+    private let failConfigSet: Bool
+
+    init(requireModelConfirmation: Bool = false, failConfigSet: Bool = false) {
+        self.requireModelConfirmation = requireModelConfirmation
+        self.failConfigSet = failConfigSet
+    }
 
     func send(_ data: Data) async throws {
         let request = try JSONDecoder().decode(JSONRPCRequest.self, from: data)
         requests.append(request)
+        if request.method == GatewayMethod.configSet && failConfigSet {
+            let response = try JSONEncoder().encode(
+                JSONRPCResponse(
+                    id: request.id,
+                    error: JSONRPCError(code: 5001, message: "Rejected model switch")
+                )
+            )
+            enqueue(response)
+            return
+        }
         let result: JSONValue
         if request.method == GatewayMethod.modelOptions {
             result = .object([
@@ -210,18 +383,32 @@ private actor RecordingSocket: GatewaySocket {
                     ])
                 ])
             ])
+        } else if request.method == GatewayMethod.sessionResume {
+            result = .object([
+                "session_id": .string("runtime-resumed"),
+                "resumed": .string("stored-2"),
+                "info": .object([
+                    "model": .string("active-model"),
+                    "provider": .string("active-provider"),
+                    "reasoning_effort": .string("high")
+                ]),
+                "messages": .array([])
+            ])
+        } else if request.method == GatewayMethod.configSet,
+                  request.params?["key"] == .string("model"),
+                  requireModelConfirmation,
+                  request.params?["confirm_expensive_model"] != .bool(true) {
+            result = .object([
+                "confirm_required": .bool(true),
+                "confirm_message": .string("Confirm expensive model")
+            ])
         } else {
             result = .object(["status": .string("ok")])
         }
         let response = try JSONEncoder().encode(
             JSONRPCResponse(id: request.id, result: result)
         )
-        if let waiter = waiters.first {
-            waiters.removeFirst()
-            waiter.resume(returning: response)
-        } else {
-            responses.append(response)
-        }
+        enqueue(response)
     }
 
     func receive() async throws -> Data {
@@ -240,6 +427,85 @@ private actor RecordingSocket: GatewaySocket {
         }
         waiters.removeAll()
     }
+
+    private func enqueue(_ response: Data) {
+        if let waiter = waiters.first {
+            waiters.removeFirst()
+            waiter.resume(returning: response)
+        } else {
+            responses.append(response)
+        }
+    }
+}
+
+private actor ControlledChatSocket: GatewaySocket {
+    private var requests: [JSONRPCRequest] = []
+    private var requestWaiters: [(Int, CheckedContinuation<[JSONRPCRequest], Never>)] = []
+    private var incoming: [Data] = []
+    private var incomingWaiters: [CheckedContinuation<Data, Error>] = []
+
+    func send(_ data: Data) async throws {
+        requests.append(try JSONDecoder().decode(JSONRPCRequest.self, from: data))
+        let ready = requestWaiters.filter { requests.count >= $0.0 }
+        requestWaiters.removeAll { requests.count >= $0.0 }
+        for (_, waiter) in ready { waiter.resume(returning: requests) }
+    }
+
+    func receive() async throws -> Data {
+        if let data = incoming.first {
+            incoming.removeFirst()
+            return data
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            incomingWaiters.append(continuation)
+        }
+    }
+
+    func cancel() async {
+        for waiter in incomingWaiters {
+            waiter.resume(throwing: GatewayTransportError.connectionLost)
+        }
+        incomingWaiters.removeAll()
+    }
+
+    func waitForRequests(count: Int) async -> [JSONRPCRequest] {
+        if requests.count >= count { return Array(requests.prefix(count)) }
+        return await withCheckedContinuation { continuation in
+            requestWaiters.append((count, continuation))
+        }
+    }
+
+    func pushResponse(id: JSONRPCID, result: JSONValue) {
+        let data = try! JSONEncoder().encode(JSONRPCResponse(id: id, result: result))
+        enqueue(data)
+    }
+
+    func pushEvent(_ event: GatewayEvent) {
+        let data = try! JSONEncoder().encode(JSONRPCEventFrame(event: event))
+        enqueue(data)
+    }
+
+    private func enqueue(_ data: Data) {
+        if let waiter = incomingWaiters.first {
+            incomingWaiters.removeFirst()
+            waiter.resume(returning: data)
+        } else {
+            incoming.append(data)
+        }
+    }
+}
+
+private func activeSessionResult(runtimeID: String, storedID: String) -> JSONValue {
+    .object([
+        "session_id": .string(runtimeID),
+        "resumed": .string(storedID),
+        "messages": .array([]),
+        "info": .object([
+            "model": .string("model-\(storedID)"),
+            "provider": .string("fixture"),
+            "reasoning_effort": .string("high")
+        ])
+    ])
 }
 
 private actor RecordingSessionMutationClient: SessionMutationClient {

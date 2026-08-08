@@ -109,14 +109,7 @@ public final class ChatModel {
             ]
         )
         let active = try GatewayProtocol.parseActiveSession(result: result)
-        ChatReducer.reduce(
-            &state,
-            action: .sessionReady(
-                runtimeID: active.runtimeID,
-                storedID: active.storedID,
-                messages: active.messages
-            )
-        )
+        applyActiveSession(active)
         insertOrUpdateSummary(
             SessionSummary(storedID: active.storedID, startedAt: Date().timeIntervalSince1970)
         )
@@ -136,14 +129,7 @@ public final class ChatModel {
             ]
         )
         let active = try GatewayProtocol.parseActiveSession(result: result)
-        ChatReducer.reduce(
-            &state,
-            action: .sessionReady(
-                runtimeID: active.runtimeID,
-                storedID: active.storedID,
-                messages: active.messages
-            )
-        )
+        applyActiveSession(active)
         return active
     }
 
@@ -366,6 +352,38 @@ public final class ChatModel {
                 messages: [ChatMessageRecord(role: .assistant, text: String(localized: "demo.welcome"))]
             )
         )
+        let demoOption = ModelOption(
+            providerID: "demo",
+            providerName: "Hermes",
+            modelID: "demo-model",
+            supportsReasoning: true
+        )
+        modelCatalog = ModelCatalog(
+            currentModel: demoOption.modelID,
+            currentProvider: demoOption.providerID,
+            providers: [ModelProviderOption(id: "demo", name: "Hermes", models: [demoOption])]
+        )
+        selectedModelID = demoOption.modelID
+        selectedProviderID = demoOption.providerID
+        reasoningEffort = "medium"
+    }
+
+    private func applyActiveSession(_ active: ActiveSession) {
+        ChatReducer.reduce(
+            &state,
+            action: .sessionReady(
+                runtimeID: active.runtimeID,
+                storedID: active.storedID,
+                messages: active.messages
+            )
+        )
+        modelCatalog = ModelCatalog(
+            currentModel: active.model,
+            currentProvider: active.provider
+        )
+        selectedModelID = active.model
+        selectedProviderID = active.provider
+        reasoningEffort = active.reasoningEffort
     }
 
     private func startEventLoop() {

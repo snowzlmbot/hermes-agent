@@ -32,6 +32,11 @@
 "message.hermes" = "Hermes";
 "message.reasoning" = "推理";
 "message.thinking" = "正在思考...";
+"model.controls.title" = "模型控制";
+"model.controls.model" = "模型";
+"model.controls.reasoning" = "推理";
+"model.controls.none" = "此会话暂无可用模型。";
+"model.controls.reasoning.unavailable" = "当前模型不支持推理控制。";
 "tool.generic" = "工具";
 "tool.running" = "运行中";
 "tool.complete" = "已完成";

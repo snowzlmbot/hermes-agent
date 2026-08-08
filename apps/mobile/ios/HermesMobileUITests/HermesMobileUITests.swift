@@ -25,8 +25,8 @@ final class HermesMobileUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Send message"].exists)
         XCTAssertTrue(app.buttons["Attach file"].exists)
 
-        let controls = app.buttons["Model controls"]
-        XCTAssertTrue(controls.exists)
+        let controls = app.descendants(matching: .any)["Model controls"]
+        XCTAssertTrue(controls.waitForExistence(timeout: 3))
         controls.tap()
         XCTAssertTrue(app.navigationBars["Model controls"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Model"].exists)
