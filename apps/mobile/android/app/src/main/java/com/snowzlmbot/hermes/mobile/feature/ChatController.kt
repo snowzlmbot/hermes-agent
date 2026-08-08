@@ -99,7 +99,7 @@ internal class ChatController(
       val sessions = runtime.listSessions()
       mutableState.value = mutableState.value.copy(
         phase = ConnectionPhase.CONNECTED,
-        sessions = sessions,
+        sessions = sessions.sortedForDisplay(),
         error = null,
       )
     } catch (error: Throwable) {
@@ -112,7 +112,10 @@ internal class ChatController(
 
   suspend fun refreshSessions() {
     try {
-      mutableState.value = mutableState.value.copy(sessions = runtime.listSessions(), error = null)
+      mutableState.value = mutableState.value.copy(
+        sessions = runtime.listSessions().sortedForDisplay(),
+        error = null,
+      )
     } catch (error: Throwable) {
       mutableState.value = mutableState.value.copy(error = error.toUiError())
     }
@@ -193,6 +196,10 @@ internal class ChatController(
     refreshSessions()
   }
 
+  suspend fun setPinned(storedId: String, pinned: Boolean) {
+    updateSession(storedId, pinned = pinned)
+  }
+
   suspend fun deleteSession(storedId: String) {
     runOperation { runtime.deleteSession(storedId) }
     refreshSessions()
@@ -242,4 +249,10 @@ internal class ChatController(
       retryable = true,
     )
   }
+
+  private fun List<SessionSummary>.sortedForDisplay(): List<SessionSummary> = sortedWith(
+    compareByDescending<SessionSummary> { it.pinned }
+      .thenByDescending { maxOf(it.lastActive, it.startedAt) }
+      .thenBy { it.storedId },
+  )
 }

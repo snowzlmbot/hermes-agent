@@ -54,6 +54,8 @@
 "action.dismiss" = "Dismiss";
 "action.new.session" = "New session";
 "action.rename" = "Rename";
+"action.pin" = "Pin";
+"action.unpin" = "Unpin";
 "action.archive" = "Archive";
 "action.delete" = "Delete";
 "action.cancel" = "Cancel";
@@ -91,6 +93,7 @@
 "error.session.create" = "Could not create a session.";
 "error.session.resume" = "Could not resume that session.";
 "error.session.rename" = "Could not rename that session.";
+"error.session.pin" = "Could not update that session's pinned state.";
 "error.session.archive" = "Could not archive that session.";
 "error.session.delete" = "Could not delete that session.";
 "error.sessions.load" = "Could not refresh sessions.";

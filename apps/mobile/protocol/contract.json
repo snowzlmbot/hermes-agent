@@ -53,6 +53,17 @@
     "secret.respond": "value",
     "sudo.respond": "password"
   },
+  "session_list_fields": [
+    "id",
+    "title",
+    "preview",
+    "started_at",
+    "last_active",
+    "message_count",
+    "source",
+    "archived",
+    "pinned"
+  ],
   "attachments": {
     "image.attach_bytes": {
       "bytes_field": "content_base64",

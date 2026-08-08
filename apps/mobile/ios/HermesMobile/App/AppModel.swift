@@ -170,6 +170,15 @@ public final class AppModel {
         }
     }
 
+    public func setSessionPinned(_ pinned: Bool, storedID: String) async {
+        guard let chatModel else { return }
+        do {
+            try await chatModel.setPinned(pinned, storedSessionID: storedID)
+        } catch {
+            errorMessage = String(localized: "error.session.pin")
+        }
+    }
+
     public func deleteSession(_ storedID: String) async {
         guard let chatModel else { return }
         do {

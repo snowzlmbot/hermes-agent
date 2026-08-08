@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PushPin
 
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
@@ -196,6 +197,7 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
           onNew = { viewModel.newSession(); scope.launch { drawerState.close() } },
           onOpen = { id -> viewModel.openSession(id); scope.launch { drawerState.close() } },
           onRename = { renameId = it },
+          onSetPinned = viewModel::setPinned,
           onArchive = { viewModel.archiveSession(it) },
           onDelete = { viewModel.deleteSession(it) },
         )
@@ -284,6 +286,7 @@ private fun SessionDrawer(
   onNew: () -> Unit,
   onOpen: (String) -> Unit,
   onRename: (String) -> Unit,
+  onSetPinned: (String, Boolean) -> Unit,
   onArchive: (String) -> Unit,
   onDelete: (String) -> Unit,
 ) {
@@ -308,7 +311,12 @@ private fun SessionDrawer(
       ) {
         TextButton(onClick = { onOpen(session.storedId) }, modifier = Modifier.weight(1f)) {
           Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
-            Text(session.displayTitle, maxLines = 1)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Text(session.displayTitle, maxLines = 1, modifier = Modifier.weight(1f))
+              if (session.pinned) {
+                Icon(Icons.Default.PushPin, contentDescription = "Pinned")
+              }
+            }
             Text(session.preview, maxLines = 1, style = MaterialTheme.typography.labelSmall)
           }
         }
@@ -317,6 +325,14 @@ private fun SessionDrawer(
             Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
           }
           DropdownMenu(expanded = menuId == session.storedId, onDismissRequest = { menuId = null }) {
+            DropdownMenuItem(
+              text = { Text(if (session.pinned) "Unpin" else "Pin") },
+              leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) },
+              onClick = {
+                menuId = null
+                onSetPinned(session.storedId, !session.pinned)
+              },
+            )
             DropdownMenuItem(text = { Text("Rename") }, onClick = { menuId = null; onRename(session.storedId) })
             DropdownMenuItem(text = { Text("Archive") }, onClick = { menuId = null; onArchive(session.storedId) })
             DropdownMenuItem(text = { Text("Delete") }, onClick = { menuId = null; onDelete(session.storedId) })

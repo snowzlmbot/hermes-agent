@@ -82,9 +82,8 @@ public final class ChatModel {
             }
             parsed = visible
         }
-        sessions = parsed.sorted { lhs, rhs in
-            max(lhs.lastActive, lhs.startedAt) > max(rhs.lastActive, rhs.startedAt)
-        }
+        sessions = parsed
+        sortSessionsForDisplay()
     }
 
     @discardableResult
@@ -229,6 +228,20 @@ public final class ChatModel {
         if archived {
             sessions.removeAll { $0.storedID == storedSessionID }
             if state.storedSessionID == storedSessionID { state = .empty }
+        }
+    }
+
+    public func setPinned(_ pinned: Bool, storedSessionID: String) async throws {
+        guard let sessionMutationClient else {
+            throw ChatModelError.archiveUnavailable
+        }
+        try await sessionMutationClient.patchSession(
+            SessionMutation(storedID: storedSessionID, pinned: pinned)
+        )
+        updateSummary(storedID: storedSessionID) { summary in
+            var updated = summary
+            updated.pinned = pinned
+            return updated
         }
     }
 
@@ -448,7 +461,8 @@ public final class ChatModel {
 
     private func insertOrUpdateSummary(_ summary: SessionSummary) {
         sessions.removeAll { $0.storedID == summary.storedID }
-        sessions.insert(summary, at: 0)
+        sessions.append(summary)
+        sortSessionsForDisplay()
     }
 
     private func updateSummary(
@@ -457,6 +471,17 @@ public final class ChatModel {
     ) {
         guard let index = sessions.firstIndex(where: { $0.storedID == storedID }) else { return }
         sessions[index] = transform(sessions[index])
+        sortSessionsForDisplay()
+    }
+
+    private func sortSessionsForDisplay() {
+        sessions.sort { lhs, rhs in
+            if lhs.pinned != rhs.pinned { return lhs.pinned && !rhs.pinned }
+            let lhsActivity = max(lhs.lastActive, lhs.startedAt)
+            let rhsActivity = max(rhs.lastActive, rhs.startedAt)
+            if lhsActivity != rhsActivity { return lhsActivity > rhsActivity }
+            return lhs.storedID < rhs.storedID
+        }
     }
 }
 

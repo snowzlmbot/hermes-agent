@@ -75,7 +75,10 @@ final class ChatModelTests: XCTestCase {
         let model = ChatModel(
             transport: transport,
             sessionMutationClient: mutations,
-            sessions: [SessionSummary(storedID: "stored-1", title: "Roadmap")]
+            sessions: [
+                SessionSummary(storedID: "stored-recent", title: "Recent", lastActive: 20),
+                SessionSummary(storedID: "stored-1", title: "Roadmap", lastActive: 1)
+            ]
         )
 
         try await model.connect()
@@ -84,6 +87,7 @@ final class ChatModelTests: XCTestCase {
         let recorded = await mutations.mutations
         let requests = await socket.requests
         XCTAssertEqual(recorded, [.init(storedID: "stored-1", pinned: true)])
+        XCTAssertEqual(model.sessions.map(\.storedID), ["stored-1", "stored-recent"])
         XCTAssertTrue(try XCTUnwrap(model.sessions.first).pinned)
         XCTAssertTrue(requests.isEmpty)
     }

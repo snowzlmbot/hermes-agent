@@ -140,6 +140,7 @@ data class SessionSummary(
   val messageCount: Int,
   val source: String,
   val archived: Boolean = false,
+  val pinned: Boolean = false,
 ) {
   val displayTitle: String get() = title.ifBlank { preview.ifBlank { "New conversation" } }
 }
@@ -196,6 +197,7 @@ object GatewayProtocol {
         messageCount = value.int("message_count") ?: 0,
         source = value.string("source").orEmpty(),
         archived = value.boolean("archived") ?: false,
+        pinned = value.boolean("pinned") ?: false,
       )
     }
 

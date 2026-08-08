@@ -30,6 +30,14 @@ struct SessionListView: View {
                         .tag(session.storedID)
                         .contextMenu {
                             Button {
+                                Task { await appModel.setSessionPinned(!session.pinned, storedID: session.storedID) }
+                            } label: {
+                                Label(
+                                    String(localized: session.pinned ? "action.unpin" : "action.pin"),
+                                    systemImage: session.pinned ? "pin.slash" : "pin"
+                                )
+                            }
+                            Button {
                                 renameTarget = session
                                 renameText = session.displayTitle
                             } label: {

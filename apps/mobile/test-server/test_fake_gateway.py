@@ -167,6 +167,9 @@ class FakeGatewayContractTests(unittest.TestCase):
 
         listed = client.request("session.list", {"limit": 20})
         self.assertGreaterEqual(len(listed["sessions"]), 1)
+        self.assertIn("last_active", listed["sessions"][0])
+        self.assertIn("archived", listed["sessions"][0])
+        self.assertIn("pinned", listed["sessions"][0])
         stored_id = listed["sessions"][0]["id"]
 
         resumed = client.request("session.resume", {"session_id": stored_id, "source": "mobile"})

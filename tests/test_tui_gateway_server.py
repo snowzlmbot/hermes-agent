@@ -10942,6 +10942,17 @@ def test_session_list_exposes_durable_mobile_flags(monkeypatch):
             captured.update(kwargs)
             return [
                 {
+                    "id": "stored-recent",
+                    "title": "Recent session",
+                    "preview": "Now",
+                    "started_at": 30,
+                    "last_active": 40,
+                    "message_count": 1,
+                    "source": "mobile",
+                    "archived": False,
+                    "pinned": False,
+                },
+                {
                     "id": "stored-1",
                     "title": "Pinned session",
                     "preview": "Ready",
@@ -10957,12 +10968,23 @@ def test_session_list_exposes_durable_mobile_flags(monkeypatch):
     monkeypatch.setattr(server, "_get_db", lambda: _DB())
 
     resp = server.handle_request(
-        {"id": "1", "method": "session.list", "params": {"limit": 20}}
+        {"id": "1", "method": "session.list", "params": {"limit": 1}}
     )
 
     assert "result" in resp, resp
     assert captured["include_pinned"] is True
     assert resp["result"]["sessions"] == [
+        {
+            "id": "stored-recent",
+            "title": "Recent session",
+            "preview": "Now",
+            "started_at": 30,
+            "last_active": 40,
+            "message_count": 1,
+            "source": "mobile",
+            "archived": False,
+            "pinned": False,
+        },
         {
             "id": "stored-1",
             "title": "Pinned session",

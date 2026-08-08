@@ -85,7 +85,12 @@ class ChatControllerTest {
 
   @Test
   fun pinningUsesStoredIdentityAndRefreshesSessions() = runTest {
-    val runtime = RecordingRuntime()
+    val runtime = RecordingRuntime().apply {
+      listedSessions = listOf(
+        summary("stored-recent", lastActive = 20),
+        summary("stored-1", lastActive = 1),
+      )
+    }
     val controller = ChatController(runtime, backgroundScope)
     controller.connect()
 
@@ -93,6 +98,8 @@ class ChatControllerTest {
 
     assertEquals(listOf("stored-1" to true), runtime.pinnedUpdates)
     assertEquals(2, runtime.sessionListRequests)
+    assertEquals(listOf("stored-1", "stored-recent"), controller.state.value.sessions.map { it.storedId })
+    assertTrue(controller.state.value.sessions.first().pinned)
   }
 
   private class RecordingRuntime : MobileGatewayRuntime {
@@ -101,6 +108,7 @@ class ChatControllerTest {
     val prompts = mutableListOf<Pair<String, String>>()
     val interrupted = mutableListOf<String>()
     val pinnedUpdates = mutableListOf<Pair<String, Boolean>>()
+    var listedSessions = listOf(summary("stored-1"))
     var sessionListRequests = 0
     var failPrompts = false
 
@@ -108,7 +116,7 @@ class ChatControllerTest {
 
     override suspend fun listSessions(): List<SessionSummary> {
       sessionListRequests += 1
-      return listOf(summary("stored-1"))
+      return listedSessions
     }
 
     override suspend fun createSession(): ActiveSession = active("runtime-new", "stored-new")
@@ -133,17 +141,22 @@ class ChatControllerTest {
       archived: Boolean?,
       pinned: Boolean?,
     ) {
-      pinnedUpdates += storedId to requireNotNull(pinned)
+      if (pinned != null) {
+        pinnedUpdates += storedId to pinned
+        listedSessions = listedSessions.map { session ->
+          if (session.storedId == storedId) session.copy(pinned = pinned) else session
+        }
+      }
     }
 
     override fun close() = Unit
 
-    private fun summary(id: String) = SessionSummary(
+    fun summary(id: String, lastActive: Long = 1) = SessionSummary(
       storedId = id,
       title = "Session",
       preview = "",
       startedAt = 1,
-      lastActive = 1,
+      lastActive = lastActive,
       messageCount = 1,
       source = "mobile",
     )

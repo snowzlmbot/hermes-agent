@@ -54,6 +54,8 @@
 "action.dismiss" = "关闭";
 "action.new.session" = "新建会话";
 "action.rename" = "重命名";
+"action.pin" = "置顶";
+"action.unpin" = "取消置顶";
 "action.archive" = "归档";
 "action.delete" = "删除";
 "action.cancel" = "取消";
@@ -91,6 +93,7 @@
 "error.session.create" = "无法创建会话。";
 "error.session.resume" = "无法恢复该会话。";
 "error.session.rename" = "无法重命名该会话。";
+"error.session.pin" = "无法更新该会话的置顶状态。";
 "error.session.archive" = "无法归档该会话。";
 "error.session.delete" = "无法删除该会话。";
 "error.sessions.load" = "无法刷新会话。";

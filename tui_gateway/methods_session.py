@@ -181,16 +181,24 @@ def _(rid, params: dict) -> dict:
             # short; the compression-tip projection in ``list_sessions_rich``
             # can also merge rows.
             fetch_limit = max(limit * 2, 200)
-            rows = [
+            eligible_rows = [
                 s
                 for s in db.list_sessions_rich(
                     source=None,
                     limit=fetch_limit,
                     order_by_last_active=True,
                     compact_rows=True,
+                    include_pinned=True,
                 )
                 if (s.get("source") or "").strip().lower() not in deny
-            ][:limit]
+            ]
+            rows = eligible_rows[:limit]
+            visible_ids = {s.get("id") for s in rows}
+            rows.extend(
+                s
+                for s in eligible_rows[limit:]
+                if s.get("pinned") and s.get("id") not in visible_ids
+            )
             return _ok(
                 rid,
                 {
@@ -200,8 +208,11 @@ def _(rid, params: dict) -> dict:
                             "title": s.get("title") or "",
                             "preview": s.get("preview") or "",
                             "started_at": s.get("started_at") or 0,
+                            "last_active": s.get("last_active") or s.get("started_at") or 0,
                             "message_count": s.get("message_count") or 0,
                             "source": s.get("source") or "",
+                            "archived": bool(s.get("archived")),
+                            "pinned": bool(s.get("pinned")),
                         }
                         for s in rows
                     ]

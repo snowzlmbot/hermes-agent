@@ -107,6 +107,10 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
     viewModelScope.launch { controller?.updateSession(storedId, archived = true) }
   }
 
+  fun setPinned(storedId: String, pinned: Boolean) {
+    viewModelScope.launch { controller?.setPinned(storedId, pinned) }
+  }
+
   fun deleteSession(storedId: String) {
     viewModelScope.launch { controller?.deleteSession(storedId) }
   }
