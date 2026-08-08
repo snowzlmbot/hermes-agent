@@ -18,6 +18,7 @@ public final class ChatModel {
     public private(set) var selectedModelID: String
     public private(set) var selectedProviderID: String
     public private(set) var reasoningEffort: String
+    public private(set) var modelCatalog: ModelCatalog
 
     @ObservationIgnored public var signalHandler: (@MainActor (ChatSignal) -> Void)?
     @ObservationIgnored private let transport: HermesGatewayTransport
@@ -42,6 +43,7 @@ public final class ChatModel {
         self.selectedModelID = ""
         self.selectedProviderID = ""
         self.reasoningEffort = ""
+        self.modelCatalog = ModelCatalog()
     }
 
 
@@ -63,6 +65,10 @@ public final class ChatModel {
             &state,
             action: .sessionReady(runtimeID: runtimeID, storedID: storedID, messages: [])
         )
+        modelCatalog = ModelCatalog()
+        selectedModelID = ""
+        selectedProviderID = ""
+        reasoningEffort = ""
     }
 
     public func loadSessions(includeArchived: Bool = false) async throws {
@@ -167,6 +173,19 @@ public final class ChatModel {
         ChatReducer.reduce(&state, action: .streamingChanged(false))
     }
 
+    public func loadModelOptions() async throws {
+        guard let runtimeID = state.runtimeSessionID else { throw ChatModelError.sessionRequired }
+        let result = try await transport.request(
+            GatewayMethod.modelOptions,
+            params: ["session_id": .string(runtimeID)]
+        )
+        guard state.runtimeSessionID == runtimeID else { return }
+        let catalog = GatewayProtocol.parseModelOptions(result: result)
+        modelCatalog = catalog
+        selectedModelID = catalog.currentModel
+        selectedProviderID = catalog.currentProvider
+    }
+
     public func selectModel(_ option: ModelOption) async throws {
         guard let runtimeID = state.runtimeSessionID else { throw ChatModelError.sessionRequired }
         _ = try await transport.request(
@@ -177,8 +196,14 @@ public final class ChatModel {
                 "value": .string("\(option.modelID) --provider \(option.providerID) --session")
             ]
         )
+        guard state.runtimeSessionID == runtimeID else { return }
         selectedModelID = option.modelID
         selectedProviderID = option.providerID
+        modelCatalog = ModelCatalog(
+            currentModel: option.modelID,
+            currentProvider: option.providerID,
+            providers: modelCatalog.providers
+        )
     }
 
     public func setReasoningEffort(_ effort: String) async throws {
@@ -192,6 +217,7 @@ public final class ChatModel {
                 "value": .string(normalized)
             ]
         )
+        guard state.runtimeSessionID == runtimeID else { return }
         reasoningEffort = normalized
     }
 

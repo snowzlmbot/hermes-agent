@@ -70,6 +70,7 @@ internal data class ChatState(
   val streaming: Boolean = false,
   val model: String = "",
   val provider: String = "",
+  val reasoningEffort: String = "",
   val error: String? = null,
   val approval: ApprovalPrompt? = null,
   val clarify: ClarifyPrompt? = null,
@@ -145,6 +146,7 @@ internal object ChatReducer {
         streaming = payload.optionalBoolean("running") ?: state.streaming,
         model = payload.string("model").ifBlank { state.model },
         provider = payload.string("provider").ifBlank { state.provider },
+        reasoningEffort = payload.string("reasoning_effort").ifBlank { state.reasoningEffort },
       )
       else -> state
     }

@@ -3,6 +3,7 @@ package com.snowzlmbot.hermes.mobile.feature
 import com.snowzlmbot.hermes.mobile.core.ActiveSession
 import com.snowzlmbot.hermes.mobile.core.GatewayEvent
 import com.snowzlmbot.hermes.mobile.core.ModelCatalog
+import com.snowzlmbot.hermes.mobile.core.ModelOption
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -30,6 +31,8 @@ internal data class MobileChatUiState(
   val phase: ConnectionPhase = ConnectionPhase.DISCONNECTED,
   val sessions: List<SessionSummary> = emptyList(),
   val chat: ChatState = ChatState.empty(),
+  val modelCatalog: ModelCatalog = ModelCatalog(),
+  val isLoadingModelOptions: Boolean = false,
   val error: MobileUiError? = null,
 )
 
@@ -172,6 +175,70 @@ internal class ChatController(
     }
   }
 
+  suspend fun refreshModelOptions() {
+    val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
+    mutableState.value = mutableState.value.copy(isLoadingModelOptions = true)
+    try {
+      val catalog = runtime.listModelOptions(runtimeId)
+      if (mutableState.value.chat.runtimeSessionId != runtimeId) return
+      val current = mutableState.value
+      mutableState.value = current.copy(
+        modelCatalog = catalog,
+        isLoadingModelOptions = false,
+        chat = current.chat.copy(
+          model = catalog.currentModel.ifBlank { current.chat.model },
+          provider = catalog.currentProvider.ifBlank { current.chat.provider },
+        ),
+        error = null,
+      )
+    } catch (error: Throwable) {
+      if (mutableState.value.chat.runtimeSessionId == runtimeId) {
+        mutableState.value = mutableState.value.copy(
+          isLoadingModelOptions = false,
+          error = error.toUiError(),
+        )
+      }
+    }
+  }
+
+  suspend fun selectModel(option: ModelOption) {
+    val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
+    try {
+      runtime.selectModel(runtimeId, option.providerId, option.id)
+      if (mutableState.value.chat.runtimeSessionId != runtimeId) return
+      val current = mutableState.value
+      mutableState.value = current.copy(
+        modelCatalog = current.modelCatalog.copy(
+          currentModel = option.id,
+          currentProvider = option.providerId,
+        ),
+        chat = current.chat.copy(model = option.id, provider = option.providerId),
+        error = null,
+      )
+    } catch (error: Throwable) {
+      if (mutableState.value.chat.runtimeSessionId == runtimeId) {
+        mutableState.value = mutableState.value.copy(error = error.toUiError())
+      }
+    }
+  }
+
+  suspend fun setReasoningEffort(effort: String) {
+    val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
+    try {
+      runtime.setReasoningEffort(runtimeId, effort)
+      if (mutableState.value.chat.runtimeSessionId != runtimeId) return
+      val current = mutableState.value
+      mutableState.value = current.copy(
+        chat = current.chat.copy(reasoningEffort = effort),
+        error = null,
+      )
+    } catch (error: Throwable) {
+      if (mutableState.value.chat.runtimeSessionId == runtimeId) {
+        mutableState.value = mutableState.value.copy(error = error.toUiError())
+      }
+    }
+  }
+
   suspend fun respondApproval(choice: String) {
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
     runOperation { runtime.respondApproval(runtimeId, choice) }
@@ -253,6 +320,7 @@ internal class ChatController(
     streaming = running,
     model = model,
     provider = provider,
+    reasoningEffort = reasoningEffort,
   )
 
   private fun Throwable.toUiError(): MobileUiError {

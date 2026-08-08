@@ -191,6 +191,36 @@ class FakeGatewayContractTests(unittest.TestCase):
             all(frame["params"].get("session_id") == runtime_id for frame in events)
         )
 
+    def test_model_controls_are_runtime_scoped_and_publish_session_info(self) -> None:
+        client = JsonRpcWebSocketClient.connect(
+            f"{self.gateway.ws_url}?token=mobile-test-token"
+        )
+        self.addCleanup(client.close)
+        client.receive_json(timeout=3)
+        created = client.request("session.create", {"source": "mobile"})
+        runtime_id = created["session_id"]
+
+        options = client.request("model.options", {"session_id": runtime_id})
+        self.assertEqual(options["model"], "fixture-model")
+        switched = client.request(
+            "config.set",
+            {
+                "session_id": runtime_id,
+                "key": "model",
+                "value": "fixture-fast --provider fixture --session",
+            },
+        )
+        self.assertEqual(switched["scope"], "session")
+        model_event = client.receive_events_until("session.info", timeout=3)[-1]
+        self.assertEqual(model_event["params"]["payload"]["model"], "fixture-fast")
+
+        client.request(
+            "config.set",
+            {"session_id": runtime_id, "key": "reasoning", "value": "max"},
+        )
+        reasoning_event = client.receive_events_until("session.info", timeout=3)[-1]
+        self.assertEqual(reasoning_event["params"]["payload"]["reasoning_effort"], "max")
+
     def test_action_and_attachment_methods_validate_payloads(self) -> None:
         client = JsonRpcWebSocketClient.connect(
             f"{self.gateway.ws_url}?token=mobile-test-token"

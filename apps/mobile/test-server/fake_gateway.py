@@ -90,6 +90,7 @@ class FakeHermesGateway:
         self._server: http.server.ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._runtime_to_stored: dict[str, str] = {}
+        self._runtime_config: dict[str, dict[str, str]] = {}
         self._sessions: dict[str, _StoredSession] = {
             "mobile-demo-session": _StoredSession(
                 id="mobile-demo-session",
@@ -516,6 +517,11 @@ class FakeHermesGateway:
     def _new_runtime(self, stored_id: str) -> str:
         runtime_id = f"runtime-{uuid.uuid4().hex[:8]}"
         self._runtime_to_stored[runtime_id] = stored_id
+        self._runtime_config[runtime_id] = {
+            "model": "fixture-model",
+            "provider": "fixture",
+            "reasoning_effort": "medium",
+        }
         return runtime_id
 
     def _require_runtime(self, request_id: Any, params: dict[str, Any]) -> tuple[str | None, dict[str, Any] | None]:
@@ -603,19 +609,30 @@ class FakeHermesGateway:
                 stored_id = self._runtime_to_stored.get(target, target)
                 if self._sessions.pop(stored_id, None) is None:
                     return self._error(request_id, 4007, "session not found"), []
+                removed_runtimes = {
+                    runtime
+                    for runtime, stored in self._runtime_to_stored.items()
+                    if stored == stored_id
+                }
                 self._runtime_to_stored = {
                     runtime: stored
                     for runtime, stored in self._runtime_to_stored.items()
                     if stored != stored_id
                 }
+                for runtime in removed_runtimes:
+                    self._runtime_config.pop(runtime, None)
                 return self._ok(request_id, {"deleted": stored_id}), []
 
             if method == "model.options":
+                runtime_id, error = self._require_runtime(request_id, params)
+                if error:
+                    return error, []
+                config = self._runtime_config[runtime_id or ""]
                 return self._ok(
                     request_id,
                     {
-                        "model": "fixture-model",
-                        "provider": "fixture",
+                        "model": config["model"],
+                        "provider": config["provider"],
                         "providers": [
                             {
                                 "slug": "fixture",
@@ -624,12 +641,46 @@ class FakeHermesGateway:
                                 "authenticated": True,
                                 "models": ["fixture-model", "fixture-fast"],
                                 "capabilities": {
-                                    "fixture-model": {"fast": True, "reasoning": True}
+                                    "fixture-model": {"fast": False, "reasoning": True},
+                                    "fixture-fast": {"fast": True, "reasoning": True},
                                 },
                             }
                         ],
                     },
                 ), []
+
+            if method == "config.set":
+                runtime_id, error = self._require_runtime(request_id, params)
+                if error:
+                    return error, []
+                key = str(params.get("key") or "").strip()
+                value = str(params.get("value") or "").strip()
+                config = self._runtime_config[runtime_id or ""]
+                if key == "model":
+                    if not value:
+                        return self._error(request_id, 4002, "model value required"), []
+                    model = value.split(" --provider ", 1)[0].strip()
+                    provider = "fixture"
+                    if " --provider " in value:
+                        provider = value.split(" --provider ", 1)[1].split(" ", 1)[0].strip()
+                    config.update({"model": model, "provider": provider})
+                elif key == "reasoning":
+                    if value not in {"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}:
+                        return self._error(request_id, 4002, "unknown reasoning value"), []
+                    config["reasoning_effort"] = value
+                else:
+                    return self._error(request_id, 4002, "unsupported config key"), []
+                return self._ok(request_id, {"key": key, "value": value, "scope": "session"}), [
+                    self._event(
+                        "session.info",
+                        runtime_id or "",
+                        {
+                            "model": config["model"],
+                            "provider": config["provider"],
+                            "reasoning_effort": config["reasoning_effort"],
+                        },
+                    )
+                ]
 
             if method == "approval.respond":
                 _runtime_id, error = self._require_runtime(request_id, params)
