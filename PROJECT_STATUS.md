@@ -4,9 +4,9 @@
 
 - **Project:** Hermes Mobile (`hermes-mobile`)
 - **Phase:** `executing`
-- **Revision:** `21`
-- **Checkpoint:** `cp-000021`
-- **Updated:** `2026-08-09T09:06:45Z`
+- **Revision:** `23`
+- **Checkpoint:** `cp-000023`
+- **Updated:** `2026-08-09T09:24:51Z`
 - **Last writer:** `hermes/default`
 
 ## Goal
@@ -15,7 +15,7 @@ Deliver production-ready native mobile clients with secure connectivity, session
 
 ## Summary
 
-Action intent checkpointed: Push the isolated iOS captured-confirmation regression test to the dedicated mobile branch and verify an exact-SHA intended RED before production changes.
+Action intent checkpointed: Push the minimal Android and iOS model-control race fixes to the dedicated mobile branch and verify all exact-SHA mobile gates.
 
 ## Done
 
@@ -31,14 +31,15 @@ Action intent checkpointed: Push the isolated iOS captured-confirmation regressi
 - Pushed 4acee5a00e6487b585513bafe374ff1ba5be65b5. Exact-SHA iOS simulator run executed the two new race regressions and both failed as intended; all other ChatModel and UI tests passed. Android was blocked only by an unnecessary onAllNodes import, while the rule method itself is supported.
 - Pushed 24958fbd3ef5bdc0760f04fe000917aa87475ab7; Android reached unit-test compilation and was blocked only by deprecated createComposeRule under allWarningsAsErrors. iOS race RED remained previously isolated.
 - Pushed df56fb7d401c2cd81a197e9b675313704d0bf594 and verified origin/hermes-agent-Mobile-app matches. GitHub Actions run 31303138104 executed 49 Android tests: the focused stale-catalog race failed as intended and ModelControlsTest reported a separate initialization error.
+- Pushed cde5896e1c1df0d8b63d5d88f7ee14227077d1ed and read back the dedicated branch. Exact-SHA Mobile run 31305152714 passed protocol, failed iOS because ChatModel lacked confirmModelSelection(pending), and retained the known Android stale-catalog and Robolectric SDK failures.
 
 ## In progress
 
-- `mobile-ios-confirmation-red-v1` [in_progress/external] — Push the isolated iOS captured-confirmation regression test to the dedicated mobile branch and verify an exact-SHA intended RED before production changes. (verify: Read back origin/hermes-agent-Mobile-app and require the Mobile workflow headSha to match the pushed commit; inspect the iOS job diagnostic for the missing captured-confirmation API or the intended failed behavior.)
+- `mobile-model-race-green-v1` [in_progress/external] — Push the minimal Android and iOS model-control race fixes to the dedicated mobile branch and verify all exact-SHA mobile gates. (verify: Read back origin/hermes-agent-Mobile-app and require exact candidate SHA for Mobile and Android workflows; require protocol, Android unit tests, lint, APK assembly, and iOS simulator tests to pass.)
 
 ## Next
 
-- Inspect Android JUnit artifact 9035128690, repair only the test environment if needed, then implement the proven Android/iOS race fixes.
+- Implement model-control generation guards, captured iOS confirmation, session-event invalidation, Robolectric SDK pin, and Android ellipsis lint fix; then push and verify all exact-SHA mobile workflows.
 
 ## Blockers
 
@@ -49,7 +50,7 @@ Action intent checkpointed: Push the isolated iOS captured-confirmation regressi
 - **Interrupted:** no
 - **Interruption reason:** `none`
 - **Requires revalidation:** yes
-- **Resume hint:** If interrupted, compare local HEAD, origin/hermes-agent-Mobile-app, PROJECT_STATE revision/current_action, and exact-SHA Mobile workflow runs before retrying any push.
+- **Resume hint:** If interrupted, compare local HEAD, remote branch, PROJECT_STATE revision/current_action, and exact-SHA workflow runs before any retry; keep ruvector.db untracked.
 
 ## Verification
 
@@ -59,8 +60,6 @@ Action intent checkpointed: Push the isolated iOS captured-confirmation regressi
 
 ## Recent evidence
 
-- [git] `1c87752567b35a82ab8e488c56d1c21142d4fab0` — Remote compiler-fix candidate (2026-08-09T07:35:43Z)
-- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31301037389` — Exact-SHA Mobile run; protocol green and test-fixture compile defects inspected (2026-08-09T07:35:43Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31301037376` — Exact-SHA Android unit workflow (2026-08-09T07:35:43Z)
 - [git] `4acee5a00e6487b585513bafe374ff1ba5be65b5` — Remote test execution candidate (2026-08-09T08:03:28Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31301666153` — iOS race tests executed and failed; protocol green (2026-08-09T08:03:28Z)
@@ -69,3 +68,5 @@ Action intent checkpointed: Push the isolated iOS captured-confirmation regressi
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31302651050` — Android unit workflow; only deprecation warning blocked compilation (2026-08-09T08:16:06Z)
 - [git] `df56fb7d401c2cd81a197e9b675313704d0bf594` — Remote dedicated branch matches the Compose v2 test candidate (2026-08-09T08:35:53Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31303138104` — Exact-SHA Android run reached unit execution; focused race RED plus one test initialization error (2026-08-09T08:35:53Z)
+- [git] `cde5896e1c1df0d8b63d5d88f7ee14227077d1ed` — Remote dedicated branch matches the isolated iOS RED candidate (2026-08-09T09:24:39Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31305152714` — Exact-SHA Mobile run proves the captured-confirmation API gap and preserves known Android RED evidence (2026-08-09T09:24:39Z)

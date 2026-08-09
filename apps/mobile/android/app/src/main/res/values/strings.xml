@@ -3,7 +3,7 @@
   <string name="app_name">Hermes</string>
   <string name="model_selected">Model: %1$s (%2$s)</string>
   <string name="model_option">%1$s (%2$s)</string>
-  <string name="models_loading">Loading models...</string>
+  <string name="models_loading">Loading models…</string>
   <string name="model_select">Select model</string>
   <string name="models_refresh">Refresh models</string>
   <string name="reasoning_selected">Reasoning: %s</string>

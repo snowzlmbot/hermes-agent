@@ -117,11 +117,14 @@ internal class ChatController(
 ) {
   private val mutableState = MutableStateFlow(MobileChatUiState())
   private val sessionOperationGeneration = AtomicLong(0)
+  private val modelControlOperationGeneration = AtomicLong(0)
   private val eventJob: Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
     runtime.events.collect { event ->
       val current = mutableState.value
       val chat = ChatReducer.reduce(current.chat, event)
       val modelChanged = chat.model != current.chat.model || chat.provider != current.chat.provider
+      val modelControlChanged = modelChanged || chat.reasoningEffort != current.chat.reasoningEffort
+      if (modelControlChanged) modelControlOperationGeneration.incrementAndGet()
       mutableState.value = current.copy(
         chat = chat,
         modelCatalog = if (modelChanged) {
@@ -129,6 +132,7 @@ internal class ChatController(
         } else {
           current.modelCatalog
         },
+        isLoadingModelOptions = if (modelControlChanged) false else current.isLoadingModelOptions,
         pendingModelConfirmation = if (modelChanged) null else current.pendingModelConfirmation,
       )
     }
@@ -167,6 +171,11 @@ internal class ChatController(
 
   suspend fun newSession() {
     val generation = sessionOperationGeneration.incrementAndGet()
+    modelControlOperationGeneration.incrementAndGet()
+    mutableState.value = mutableState.value.copy(
+      isLoadingModelOptions = false,
+      pendingModelConfirmation = null,
+    )
     try {
       val active = runtime.createSession()
       if (sessionOperationGeneration.get() != generation) return
@@ -188,6 +197,11 @@ internal class ChatController(
   suspend fun openSession(storedId: String) {
     if (storedId.isBlank()) return
     val generation = sessionOperationGeneration.incrementAndGet()
+    modelControlOperationGeneration.incrementAndGet()
+    mutableState.value = mutableState.value.copy(
+      isLoadingModelOptions = false,
+      pendingModelConfirmation = null,
+    )
     try {
       val active = runtime.resumeSession(storedId)
       if (sessionOperationGeneration.get() != generation) return
@@ -229,10 +243,11 @@ internal class ChatController(
 
   suspend fun refreshModelOptions(forceRefresh: Boolean = false) {
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
+    val generation = modelControlOperationGeneration.incrementAndGet()
     mutableState.value = mutableState.value.copy(isLoadingModelOptions = true)
     try {
       val catalog = runtime.listModelOptions(runtimeId, refresh = forceRefresh)
-      if (mutableState.value.chat.runtimeSessionId != runtimeId) return
+      if (!isCurrentModelControlOperation(generation, runtimeId)) return
       val current = mutableState.value
       mutableState.value = current.copy(
         modelCatalog = catalog,
@@ -245,7 +260,7 @@ internal class ChatController(
       )
     } catch (error: Throwable) {
       if (error is CancellationException) throw error
-      if (mutableState.value.chat.runtimeSessionId == runtimeId) {
+      if (isCurrentModelControlOperation(generation, runtimeId)) {
         mutableState.value = mutableState.value.copy(
           isLoadingModelOptions = false,
           error = error.toUiError(),
@@ -256,8 +271,14 @@ internal class ChatController(
 
   suspend fun selectModel(option: ModelOption, confirmExpensiveModel: Boolean = false) {
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
-    if (!confirmExpensiveModel) {
-      mutableState.value = mutableState.value.copy(pendingModelConfirmation = null)
+    val generation = modelControlOperationGeneration.incrementAndGet()
+    mutableState.value = if (confirmExpensiveModel) {
+      mutableState.value.copy(isLoadingModelOptions = false)
+    } else {
+      mutableState.value.copy(
+        isLoadingModelOptions = false,
+        pendingModelConfirmation = null,
+      )
     }
     try {
       val result = runtime.selectModel(
@@ -266,7 +287,7 @@ internal class ChatController(
         option.id,
         confirmExpensiveModel = confirmExpensiveModel,
       )
-      if (mutableState.value.chat.runtimeSessionId != runtimeId) return
+      if (!isCurrentModelControlOperation(generation, runtimeId)) return
       val current = mutableState.value
       mutableState.value = when (result) {
         ModelSwitchResult.Applied -> current.copy(
@@ -285,7 +306,7 @@ internal class ChatController(
       }
     } catch (error: Throwable) {
       if (error is CancellationException) throw error
-      if (mutableState.value.chat.runtimeSessionId == runtimeId) {
+      if (isCurrentModelControlOperation(generation, runtimeId)) {
         mutableState.value = mutableState.value.copy(error = error.toUiError())
       }
     }
@@ -302,16 +323,19 @@ internal class ChatController(
 
   suspend fun setReasoningEffort(effort: String) {
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
+    val generation = modelControlOperationGeneration.incrementAndGet()
+    mutableState.value = mutableState.value.copy(isLoadingModelOptions = false)
     try {
       runtime.setReasoningEffort(runtimeId, effort)
-      if (mutableState.value.chat.runtimeSessionId != runtimeId) return
+      if (!isCurrentModelControlOperation(generation, runtimeId)) return
       val current = mutableState.value
       mutableState.value = current.copy(
         chat = current.chat.copy(reasoningEffort = effort),
         error = null,
       )
     } catch (error: Throwable) {
-      if (mutableState.value.chat.runtimeSessionId == runtimeId) {
+      if (error is CancellationException) throw error
+      if (isCurrentModelControlOperation(generation, runtimeId)) {
         mutableState.value = mutableState.value.copy(error = error.toUiError())
       }
     }
@@ -370,6 +394,7 @@ internal class ChatController(
 
   fun close() {
     sessionOperationGeneration.incrementAndGet()
+    modelControlOperationGeneration.incrementAndGet()
     eventJob.cancel()
     runtime.close()
   }
@@ -382,6 +407,9 @@ internal class ChatController(
       mutableState.value = mutableState.value.copy(error = error.toUiError())
     }
   }
+
+  private fun isCurrentModelControlOperation(generation: Long, runtimeId: String): Boolean =
+    modelControlOperationGeneration.get() == generation && mutableState.value.chat.runtimeSessionId == runtimeId
 
   private fun ActiveSession.toChatState(): ChatState = ChatState(
     runtimeSessionId = runtimeId,

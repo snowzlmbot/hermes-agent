@@ -7,16 +7,16 @@
     "root": ".",
     "purpose": "Native iOS and Android clients for Hermes gateway sessions and agent workflows."
   },
-  "revision": 21,
+  "revision": 23,
   "phase": "executing",
-  "updatedAt": "2026-08-09T09:06:45Z",
+  "updatedAt": "2026-08-09T09:24:51Z",
   "updatedBy": {
     "runtime": "hermes",
     "profile": "default",
     "actor": "ZLMAIonebot"
   },
   "goal": "Deliver production-ready native mobile clients with secure connectivity, session management, streaming chat, model controls, tools, prompts, media, voice, notifications, localization, and adaptive layouts.",
-  "summary": "Action intent checkpointed: Push the isolated iOS captured-confirmation regression test to the dedicated mobile branch and verify an exact-SHA intended RED before production changes.",
+  "summary": "Action intent checkpointed: Push the minimal Android and iOS model-control race fixes to the dedicated mobile branch and verify all exact-SHA mobile gates.",
   "done": [
     "Added native model and reasoning controls, runtime-scoped catalog resets, iOS demo capability data, and focused Android/iOS regression tests.",
     "Bound model capability rendering to confirmed runtime state and restored graph-output ignore rules.",
@@ -29,23 +29,24 @@
     "Pushed compiler-fix candidate 1c87752567b35a82ab8e488c56d1c21142d4fab0; exact-SHA CI passed protocol and production compilation, then exposed test-fixture compile errors before race assertions: Swift binding typo and unsupported Compose assertDoesNotExist import.",
     "Pushed 4acee5a00e6487b585513bafe374ff1ba5be65b5. Exact-SHA iOS simulator run executed the two new race regressions and both failed as intended; all other ChatModel and UI tests passed. Android was blocked only by an unnecessary onAllNodes import, while the rule method itself is supported.",
     "Pushed 24958fbd3ef5bdc0760f04fe000917aa87475ab7; Android reached unit-test compilation and was blocked only by deprecated createComposeRule under allWarningsAsErrors. iOS race RED remained previously isolated.",
-    "Pushed df56fb7d401c2cd81a197e9b675313704d0bf594 and verified origin/hermes-agent-Mobile-app matches. GitHub Actions run 31303138104 executed 49 Android tests: the focused stale-catalog race failed as intended and ModelControlsTest reported a separate initialization error."
+    "Pushed df56fb7d401c2cd81a197e9b675313704d0bf594 and verified origin/hermes-agent-Mobile-app matches. GitHub Actions run 31303138104 executed 49 Android tests: the focused stale-catalog race failed as intended and ModelControlsTest reported a separate initialization error.",
+    "Pushed cde5896e1c1df0d8b63d5d88f7ee14227077d1ed and read back the dedicated branch. Exact-SHA Mobile run 31305152714 passed protocol, failed iOS because ChatModel lacked confirmModelSelection(pending), and retained the known Android stale-catalog and Robolectric SDK failures."
   ],
   "inProgress": [
     {
-      "id": "mobile-ios-confirmation-red-v1",
-      "summary": "Push the isolated iOS captured-confirmation regression test to the dedicated mobile branch and verify an exact-SHA intended RED before production changes.",
+      "id": "mobile-model-race-green-v1",
+      "summary": "Push the minimal Android and iOS model-control race fixes to the dedicated mobile branch and verify all exact-SHA mobile gates.",
       "status": "in_progress",
       "sideEffect": "external",
-      "idempotencyKey": "mobile-ios-confirmation-red-v1",
+      "idempotencyKey": "mobile-model-race-green-v1",
       "ownerRuntime": "hermes",
-      "startedAt": "2026-08-09T09:06:45Z",
-      "verify": "Read back origin/hermes-agent-Mobile-app and require the Mobile workflow headSha to match the pushed commit; inspect the iOS job diagnostic for the missing captured-confirmation API or the intended failed behavior.",
+      "startedAt": "2026-08-09T09:24:51Z",
+      "verify": "Read back origin/hermes-agent-Mobile-app and require exact candidate SHA for Mobile and Android workflows; require protocol, Android unit tests, lint, APK assembly, and iOS simulator tests to pass.",
       "evidence": []
     }
   ],
   "next": [
-    "Inspect Android JUnit artifact 9035128690, repair only the test environment if needed, then implement the proven Android/iOS race fixes."
+    "Implement model-control generation guards, captured iOS confirmation, session-event invalidation, Robolectric SDK pin, and Android ellipsis lint fix; then push and verify all exact-SHA mobile workflows."
   ],
   "blockers": [],
   "decisions": [],
@@ -181,6 +182,18 @@
       "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31303138104",
       "summary": "Exact-SHA Android run reached unit execution; focused race RED plus one test initialization error",
       "verifiedAt": "2026-08-09T08:35:53Z"
+    },
+    {
+      "kind": "git",
+      "ref": "cde5896e1c1df0d8b63d5d88f7ee14227077d1ed",
+      "summary": "Remote dedicated branch matches the isolated iOS RED candidate",
+      "verifiedAt": "2026-08-09T09:24:39Z"
+    },
+    {
+      "kind": "ci",
+      "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31305152714",
+      "summary": "Exact-SHA Mobile run proves the captured-confirmation API gap and preserves known Android RED evidence",
+      "verifiedAt": "2026-08-09T09:24:39Z"
     }
   ],
   "verification": {
@@ -189,14 +202,14 @@
     "checkedAt": "2026-08-08T15:46:34Z"
   },
   "checkpoint": {
-    "id": "cp-000021",
-    "sequence": 21,
-    "reason": "action_begin:mobile-ios-confirmation-red-v1",
-    "at": "2026-08-09T09:06:45Z"
+    "id": "cp-000023",
+    "sequence": 23,
+    "reason": "action_begin:mobile-model-race-green-v1",
+    "at": "2026-08-09T09:24:51Z"
   },
   "recovery": {
-    "resumeHint": "If interrupted, compare local HEAD, origin/hermes-agent-Mobile-app, PROJECT_STATE revision/current_action, and exact-SHA Mobile workflow runs before retrying any push.",
-    "lastSafeCheckpoint": "cp-000021",
+    "resumeHint": "If interrupted, compare local HEAD, remote branch, PROJECT_STATE revision/current_action, and exact-SHA workflow runs before any retry; keep ruvector.db untracked.",
+    "lastSafeCheckpoint": "cp-000023",
     "interrupted": false,
     "interruptionReason": null,
     "requiresRevalidation": true

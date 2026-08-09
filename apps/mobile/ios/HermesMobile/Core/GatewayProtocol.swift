@@ -15,11 +15,13 @@ public struct PendingModelConfirmation: Equatable, Sendable {
     public let option: ModelOption
     public let message: String
     public let runtimeID: String
+    public let operationGeneration: UInt
 
-    public init(option: ModelOption, message: String, runtimeID: String) {
+    public init(option: ModelOption, message: String, runtimeID: String, operationGeneration: UInt) {
         self.option = option
         self.message = message
         self.runtimeID = runtimeID
+        self.operationGeneration = operationGeneration
     }
 }
 
@@ -249,7 +251,8 @@ public enum GatewayProtocol {
     public static func parseModelSwitch(result: JSONValue) -> ModelSwitchResult {
         let root = result.object ?? [:]
         if root["confirm_required"]?.boolValue == true {
-            let message = root["confirm_message"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawMessage = root["confirm_message"]?.stringValue
+            let message = rawMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
             if let message, !message.isEmpty {
                 return .confirmationRequired(message: message)
             }

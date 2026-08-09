@@ -101,8 +101,8 @@ struct ModelControlsSheet: View {
                 ),
                 titleVisibility: .visible,
                 presenting: chat.pendingModelConfirmation
-            ) { _ in
-                Button(String(localized: "action.continue")) { confirmSelection() }
+            ) { pending in
+                Button(String(localized: "action.continue")) { confirmSelection(pending) }
                 Button(String(localized: "action.cancel"), role: .cancel) {
                     chat.cancelPendingModelSelection()
                 }
@@ -156,10 +156,10 @@ struct ModelControlsSheet: View {
         }
     }
 
-    private func confirmSelection() {
+    private func confirmSelection(_ pending: PendingModelConfirmation) {
         Task {
             do {
-                try await chat.confirmPendingModelSelection()
+                try await chat.confirmModelSelection(pending)
             } catch {
                 operationError = chat.controlErrorMessage ?? String(localized: "error.model.switch")
             }

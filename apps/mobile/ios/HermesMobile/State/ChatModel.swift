@@ -243,7 +243,8 @@ public final class ChatModel {
                 pendingModelConfirmation = PendingModelConfirmation(
                     option: option,
                     message: message,
-                    runtimeID: runtimeID
+                    runtimeID: runtimeID,
+                    operationGeneration: generation
                 )
             }
             return outcome
@@ -257,6 +258,12 @@ public final class ChatModel {
 
     public func confirmPendingModelSelection() async throws {
         guard let pending = pendingModelConfirmation else { return }
+        try await confirmModelSelection(pending)
+    }
+
+    public func confirmModelSelection(_ pending: PendingModelConfirmation) async throws {
+        guard pending.runtimeID == state.runtimeSessionID,
+              pending.operationGeneration == modelControlOperationGeneration else { return }
         _ = try await selectModel(pending.option, confirmExpensiveModel: true)
     }
 
@@ -452,6 +459,7 @@ public final class ChatModel {
 
     private func beginModelControlOperation() -> UInt {
         modelControlOperationGeneration &+= 1
+        isLoadingModelOptions = false
         return modelControlOperationGeneration
     }
 
@@ -506,16 +514,29 @@ public final class ChatModel {
             ChatReducer.reduce(&state, action: .statusUpdated(String(localized: "connection.connected")))
         case .sessionInfo:
             guard event.sessionID == nil || event.sessionID == state.runtimeSessionID else { return }
+            let eventModel = payload["model"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+            let eventProvider = payload["provider"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+            let eventReasoningEffort = payload["reasoning_effort"]?.stringValue.flatMap { $0.isEmpty ? nil : $0 }
+            let modelChanged = eventModel.map { $0 != selectedModelID } == true
+                || eventProvider.map { $0 != selectedProviderID } == true
+            let modelControlChanged = modelChanged
+                || eventReasoningEffort.map { $0 != reasoningEffort } == true
+            if modelControlChanged {
+                _ = beginModelControlOperation()
+                if modelChanged {
+                    pendingModelConfirmation = nil
+                }
+            }
             if let running = payload["running"]?.boolValue {
                 ChatReducer.reduce(&state, action: .streamingChanged(running))
             }
-            if let model = payload["model"]?.stringValue, !model.isEmpty {
+            if let model = eventModel {
                 selectedModelID = model
             }
-            if let provider = payload["provider"]?.stringValue, !provider.isEmpty {
+            if let provider = eventProvider {
                 selectedProviderID = provider
             }
-            if let effort = payload["reasoning_effort"]?.stringValue, !effort.isEmpty {
+            if let effort = eventReasoningEffort {
                 reasoningEffort = effort
             }
             if !selectedModelID.isEmpty || !selectedProviderID.isEmpty {
