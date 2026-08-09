@@ -1,22 +1,22 @@
 {
-  "schema": "zlmaionebot.project-state.v1",
-  "schemaVersion": 1,
+  "schema": "zlmaionebot.project-state.v2",
+  "schemaVersion": 2,
   "project": {
     "id": "hermes-mobile",
     "name": "Hermes Mobile",
     "root": ".",
     "purpose": "Native iOS and Android clients for Hermes gateway sessions and agent workflows."
   },
-  "revision": 23,
+  "revision": 25,
   "phase": "executing",
-  "updatedAt": "2026-08-09T09:24:51Z",
+  "updatedAt": "2026-08-09T09:47:02Z",
   "updatedBy": {
     "runtime": "hermes",
     "profile": "default",
     "actor": "ZLMAIonebot"
   },
   "goal": "Deliver production-ready native mobile clients with secure connectivity, session management, streaming chat, model controls, tools, prompts, media, voice, notifications, localization, and adaptive layouts.",
-  "summary": "Action intent checkpointed: Push the minimal Android and iOS model-control race fixes to the dedicated mobile branch and verify all exact-SHA mobile gates.",
+  "summary": "Action intent checkpointed: Push the Java 17-compatible Robolectric SDK pin and verify the complete model-control GREEN candidate on both mobile workflows.",
   "done": [
     "Added native model and reasoning controls, runtime-scoped catalog resets, iOS demo capability data, and focused Android/iOS regression tests.",
     "Bound model capability rendering to confirmed runtime state and restored graph-output ignore rules.",
@@ -30,23 +30,24 @@
     "Pushed 4acee5a00e6487b585513bafe374ff1ba5be65b5. Exact-SHA iOS simulator run executed the two new race regressions and both failed as intended; all other ChatModel and UI tests passed. Android was blocked only by an unnecessary onAllNodes import, while the rule method itself is supported.",
     "Pushed 24958fbd3ef5bdc0760f04fe000917aa87475ab7; Android reached unit-test compilation and was blocked only by deprecated createComposeRule under allWarningsAsErrors. iOS race RED remained previously isolated.",
     "Pushed df56fb7d401c2cd81a197e9b675313704d0bf594 and verified origin/hermes-agent-Mobile-app matches. GitHub Actions run 31303138104 executed 49 Android tests: the focused stale-catalog race failed as intended and ModelControlsTest reported a separate initialization error.",
-    "Pushed cde5896e1c1df0d8b63d5d88f7ee14227077d1ed and read back the dedicated branch. Exact-SHA Mobile run 31305152714 passed protocol, failed iOS because ChatModel lacked confirmModelSelection(pending), and retained the known Android stale-catalog and Robolectric SDK failures."
+    "Pushed cde5896e1c1df0d8b63d5d88f7ee14227077d1ed and read back the dedicated branch. Exact-SHA Mobile run 31305152714 passed protocol, failed iOS because ChatModel lacked confirmModelSelection(pending), and retained the known Android stale-catalog and Robolectric SDK failures.",
+    "Pushed and read back 0b224367eccbaf803e15861cd5b06eb7396b02a3. Exact-SHA Mobile run 31305982336 passed protocol and iOS simulator tests; Android executed 49 tests with all business tests passing, but ModelControlsTest sandbox failed because Robolectric SDK 36 requires Java 21 while CI uses Java 17. Exact-SHA Android run 31305982338 showed the same sole sandbox failure."
   ],
   "inProgress": [
     {
-      "id": "mobile-model-race-green-v1",
-      "summary": "Push the minimal Android and iOS model-control race fixes to the dedicated mobile branch and verify all exact-SHA mobile gates.",
+      "id": "mobile-model-race-green-v2",
+      "summary": "Push the Java 17-compatible Robolectric SDK pin and verify the complete model-control GREEN candidate on both mobile workflows.",
       "status": "in_progress",
       "sideEffect": "external",
-      "idempotencyKey": "mobile-model-race-green-v1",
+      "idempotencyKey": "mobile-model-race-green-v2",
       "ownerRuntime": "hermes",
-      "startedAt": "2026-08-09T09:24:51Z",
-      "verify": "Read back origin/hermes-agent-Mobile-app and require exact candidate SHA for Mobile and Android workflows; require protocol, Android unit tests, lint, APK assembly, and iOS simulator tests to pass.",
+      "startedAt": "2026-08-09T09:47:02Z",
+      "verify": "Read back origin/hermes-agent-Mobile-app and require exact candidate SHA for Mobile and Android workflows; require protocol, Android 49 tests, lint, APK assembly, and iOS simulator tests to pass.",
       "evidence": []
     }
   ],
   "next": [
-    "Implement model-control generation guards, captured iOS confirmation, session-event invalidation, Robolectric SDK pin, and Android ellipsis lint fix; then push and verify all exact-SHA mobile workflows."
+    "Pin the Robolectric Compose test to SDK 35, push a new exact-SHA candidate, and require Android unit, lint, APK, protocol, and iOS simulator gates to pass."
   ],
   "blockers": [],
   "decisions": [],
@@ -194,6 +195,24 @@
       "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31305152714",
       "summary": "Exact-SHA Mobile run proves the captured-confirmation API gap and preserves known Android RED evidence",
       "verifiedAt": "2026-08-09T09:24:39Z"
+    },
+    {
+      "kind": "git",
+      "ref": "0b224367eccbaf803e15861cd5b06eb7396b02a3",
+      "summary": "Remote dedicated branch matches the first GREEN candidate",
+      "verifiedAt": "2026-08-09T09:46:51Z"
+    },
+    {
+      "kind": "ci",
+      "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31305982336",
+      "summary": "Protocol and iOS simulator green; Android isolated to Java 17 versus Robolectric SDK 36 sandbox incompatibility",
+      "verifiedAt": "2026-08-09T09:46:51Z"
+    },
+    {
+      "kind": "ci",
+      "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31305982338",
+      "summary": "Android business tests green with only ModelControlsTest sandbox initialization failing",
+      "verifiedAt": "2026-08-09T09:46:51Z"
     }
   ],
   "verification": {
@@ -202,16 +221,32 @@
     "checkedAt": "2026-08-08T15:46:34Z"
   },
   "checkpoint": {
-    "id": "cp-000023",
-    "sequence": 23,
-    "reason": "action_begin:mobile-model-race-green-v1",
-    "at": "2026-08-09T09:24:51Z"
+    "id": "cp-000025",
+    "sequence": 25,
+    "reason": "action_begin:mobile-model-race-green-v2",
+    "at": "2026-08-09T09:47:02Z"
   },
   "recovery": {
-    "resumeHint": "If interrupted, compare local HEAD, remote branch, PROJECT_STATE revision/current_action, and exact-SHA workflow runs before any retry; keep ruvector.db untracked.",
-    "lastSafeCheckpoint": "cp-000023",
+    "resumeHint": "If interrupted, compare local HEAD, remote branch, PROJECT_STATE revision/current_action, and exact-SHA workflow runs before retrying; keep ruvector.db untracked.",
+    "lastSafeCheckpoint": "cp-000025",
     "interrupted": false,
     "interruptionReason": null,
     "requiresRevalidation": true
+  },
+  "change": {
+    "previous": null,
+    "latest": null,
+    "lastChangedAt": null
+  },
+  "automation": {
+    "graphify": {
+      "status": "idle",
+      "requestedFingerprint": null,
+      "completedFingerprint": null,
+      "requestedAt": null,
+      "startedAt": null,
+      "completedAt": null,
+      "summary": ""
+    }
   }
 }
