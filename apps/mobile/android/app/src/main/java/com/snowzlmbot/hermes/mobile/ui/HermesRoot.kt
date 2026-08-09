@@ -70,10 +70,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.snowzlmbot.hermes.mobile.R
 import com.snowzlmbot.hermes.mobile.app.AppScreen
 import com.snowzlmbot.hermes.mobile.app.AppUiState
 import com.snowzlmbot.hermes.mobile.app.HermesAppViewModel
@@ -239,15 +241,15 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
       },
       snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-      if (chat == null) {
+      if (chat == null || mobile == null) {
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
           Text("Preparing a conversation")
         }
       } else {
         ChatContent(
           chat = chat,
-          modelCatalog = mobile?.modelCatalog ?: ModelCatalog(),
-          isLoadingModelOptions = mobile?.isLoadingModelOptions == true,
+          modelCatalog = mobile.modelCatalog,
+          isLoadingModelOptions = mobile.isLoadingModelOptions,
           viewModel = viewModel,
           modifier = Modifier.fillMaxSize().padding(padding),
           onAttach = { showAttachmentMenu = true },
@@ -262,6 +264,23 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
     }
   }
 
+  mobile?.pendingModelConfirmation?.let { pending ->
+    AlertDialog(
+      onDismissRequest = viewModel::cancelModelSelection,
+      title = { Text(stringResource(R.string.model_confirmation_title)) },
+      text = { Text(pending.message) },
+      confirmButton = {
+        Button(onClick = viewModel::confirmModelSelection) {
+          Text(stringResource(R.string.action_confirm))
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = viewModel::cancelModelSelection) {
+          Text(stringResource(R.string.action_cancel))
+        }
+      },
+    )
+  }
   renameId?.let { storedId ->
     RenameDialog(
       onDismiss = { renameId = null },
@@ -383,7 +402,7 @@ private fun ChatContent(
       currentProvider = chat.provider,
       reasoningEffort = chat.reasoningEffort,
       isLoading = isLoadingModelOptions,
-      onRefresh = viewModel::refreshModelOptions,
+      onRefresh = { viewModel.refreshModelOptions(forceRefresh = true) },
       onSelectModel = viewModel::selectModel,
       onSetReasoningEffort = viewModel::setReasoningEffort,
       modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),

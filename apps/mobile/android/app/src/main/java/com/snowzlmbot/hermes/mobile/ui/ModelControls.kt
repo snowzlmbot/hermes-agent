@@ -15,7 +15,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.snowzlmbot.hermes.mobile.R
 import com.snowzlmbot.hermes.mobile.core.ModelCatalog
 import com.snowzlmbot.hermes.mobile.core.ModelOption
 
@@ -47,7 +49,10 @@ internal fun ModelControls(
         onClick = { modelExpanded = true },
         modifier = Modifier.fillMaxWidth().testTag("model-picker"),
       ) {
-        Text(selected?.let { "Model: ${it.id}" } ?: if (isLoading) "Loading models..." else "Select model")
+        Text(
+          selected?.let { stringResource(R.string.model_selected, it.id, it.providerName) }
+            ?: if (isLoading) stringResource(R.string.models_loading) else stringResource(R.string.model_select)
+        )
       }
       DropdownMenu(
         expanded = modelExpanded,
@@ -55,7 +60,7 @@ internal fun ModelControls(
       ) {
         models.forEach { option ->
           DropdownMenuItem(
-            text = { Text(option.id) },
+            text = { Text(stringResource(R.string.model_option, option.id, option.providerName)) },
             onClick = {
               modelExpanded = false
               onSelectModel(option)
@@ -63,7 +68,7 @@ internal fun ModelControls(
           )
         }
         DropdownMenuItem(
-          text = { Text("Refresh models") },
+          text = { Text(stringResource(R.string.models_refresh)) },
           onClick = {
             modelExpanded = false
             onRefresh()
@@ -78,7 +83,7 @@ internal fun ModelControls(
           onClick = { reasoningExpanded = true },
           modifier = Modifier.fillMaxWidth().testTag("reasoning-picker"),
         ) {
-          Text("Reasoning: ${reasoningEffort.ifBlank { "medium" }}")
+          Text(stringResource(R.string.reasoning_selected, reasoningEffort.ifBlank { stringResource(R.string.reasoning_default) }))
         }
         DropdownMenu(
           expanded = reasoningExpanded,

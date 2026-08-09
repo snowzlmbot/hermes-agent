@@ -4,9 +4,9 @@
 
 - **Project:** Hermes Mobile (`hermes-mobile`)
 - **Phase:** `executing`
-- **Revision:** `9`
-- **Checkpoint:** `cp-000009`
-- **Updated:** `2026-08-09T06:49:50Z`
+- **Revision:** `11`
+- **Checkpoint:** `cp-000011`
+- **Updated:** `2026-08-09T07:07:49Z`
 - **Last writer:** `hermes/default`
 
 ## Goal
@@ -15,7 +15,7 @@ Deliver production-ready native mobile clients with secure connectivity, session
 
 ## Summary
 
-Action intent checkpointed: Commit and push focused Android and iOS race regression tests without the held production fixes.
+Action intent checkpointed: Commit and push the held Android/iOS model-control implementation without the newly identified race fixes.
 
 ## Done
 
@@ -25,14 +25,15 @@ Action intent checkpointed: Commit and push focused Android and iOS race regress
 - Verified production config.set can return confirm_required without applying a high-cost model switch.
 - Pushed RED candidate 092833663cedc811e529bcd01527622b2df887a9; protocol validation passed, Android failed its Kotlin compile gate, and iOS failed on the newly required typed model-switch and refresh APIs.
 - Verified RED candidate 092833663cedc811e529bcd01527622b2df887a9 on origin/hermes-agent-Mobile-app and inspected exact-SHA Android and iOS CI failures.
+- Pushed test-only candidate 74b9e4fc3abb1bef142a1eb007cd79efd23f444f and verified exact-SHA Mobile runs; protocol passed, while prior missing model-control production APIs still blocked Android/iOS before the new race assertions executed.
 
 ## In progress
 
-- `mobile-model-race-red-v1` [in_progress/external] — Commit and push focused Android and iOS race regression tests without the held production fixes. (verify: Read back origin/hermes-agent-Mobile-app SHA and require exact-SHA Mobile workflows to fail only on the new state-race assertions or compile-sensitive test defects.)
+- `mobile-model-controls-base-green-v1` [in_progress/external] — Commit and push the held Android/iOS model-control implementation without the newly identified race fixes. (verify: Read back the dedicated branch SHA and require exact-SHA CI to compile the typed confirmation/refresh APIs, then fail only on the focused new race assertions.)
 
 ## Next
 
-- Review local Android and iOS production fixes, push a GREEN candidate, and require exact-SHA Mobile workflows to pass.
+- Commit the held Android/iOS model-control implementation without the new race fixes, then inspect exact-SHA CI for isolated race failures.
 
 ## Blockers
 
@@ -43,7 +44,7 @@ Action intent checkpointed: Commit and push focused Android and iOS race regress
 - **Interrupted:** no
 - **Interruption reason:** `none`
 - **Requires revalidation:** yes
-- **Resume hint:** Validate project state, compare the remote branch SHA, and inspect exact-SHA Android/iOS CI before any retry.
+- **Resume hint:** Validate project state and remote SHA, inspect exact-SHA jobs, and do not re-push before checking whether the isolated race RED appeared.
 
 ## Verification
 
@@ -59,3 +60,6 @@ Action intent checkpointed: Commit and push focused Android and iOS race regress
 - [git] `092833663cedc811e529bcd01527622b2df887a9` — Remote dedicated branch matches the RED candidate (2026-08-09T06:30:09Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936626` — Exact-SHA Mobile RED run inspected (2026-08-09T06:30:09Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936635` — Exact-SHA Android RED run inspected (2026-08-09T06:30:09Z)
+- [git] `74b9e4fc3abb1bef142a1eb007cd79efd23f444f` — Remote dedicated branch matches the test-only race candidate (2026-08-09T07:03:28Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31299826076` — Exact-SHA Mobile run; protocol green and prior production API gaps remain RED (2026-08-09T07:03:28Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31299826059` — Exact-SHA Android unit workflow for the test-only candidate (2026-08-09T07:03:28Z)

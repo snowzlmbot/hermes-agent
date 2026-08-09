@@ -5,6 +5,7 @@ import com.snowzlmbot.hermes.mobile.core.GatewayEvent
 import com.snowzlmbot.hermes.mobile.core.ModelCatalog
 import com.snowzlmbot.hermes.mobile.core.ModelOption
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -27,12 +28,23 @@ internal data class MobileUiError(
   val retryable: Boolean,
 )
 
+internal sealed interface ModelSwitchResult {
+  data object Applied : ModelSwitchResult
+  data class ConfirmationRequired(val message: String) : ModelSwitchResult
+}
+
+internal data class PendingModelConfirmation(
+  val option: ModelOption,
+  val message: String,
+)
+
 internal data class MobileChatUiState(
   val phase: ConnectionPhase = ConnectionPhase.DISCONNECTED,
   val sessions: List<SessionSummary> = emptyList(),
   val chat: ChatState = ChatState.empty(),
   val modelCatalog: ModelCatalog = ModelCatalog(),
   val isLoadingModelOptions: Boolean = false,
+  val pendingModelConfirmation: PendingModelConfirmation? = null,
   val error: MobileUiError? = null,
 )
 
@@ -46,11 +58,16 @@ internal interface MobileGatewayRuntime {
   suspend fun submitPrompt(runtimeId: String, text: String)
   suspend fun interrupt(runtimeId: String)
 
-  suspend fun listModelOptions(runtimeId: String): ModelCatalog {
+  suspend fun listModelOptions(runtimeId: String, refresh: Boolean = false): ModelCatalog {
     error("Model options are unavailable")
   }
 
-  suspend fun selectModel(runtimeId: String, provider: String, model: String) {
+  suspend fun selectModel(
+    runtimeId: String,
+    provider: String,
+    model: String,
+    confirmExpensiveModel: Boolean = false,
+  ): ModelSwitchResult {
     error("Model selection is unavailable")
   }
 
@@ -99,10 +116,21 @@ internal class ChatController(
   scope: CoroutineScope,
 ) {
   private val mutableState = MutableStateFlow(MobileChatUiState())
+  private val sessionOperationGeneration = AtomicLong(0)
   private val eventJob: Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
     runtime.events.collect { event ->
       val current = mutableState.value
-      mutableState.value = current.copy(chat = ChatReducer.reduce(current.chat, event))
+      val chat = ChatReducer.reduce(current.chat, event)
+      val modelChanged = chat.model != current.chat.model || chat.provider != current.chat.provider
+      mutableState.value = current.copy(
+        chat = chat,
+        modelCatalog = if (modelChanged) {
+          current.modelCatalog.copy(currentModel = chat.model, currentProvider = chat.provider)
+        } else {
+          current.modelCatalog
+        },
+        pendingModelConfirmation = if (modelChanged) null else current.pendingModelConfirmation,
+      )
     }
   }
 
@@ -138,29 +166,43 @@ internal class ChatController(
   }
 
   suspend fun newSession() {
+    val generation = sessionOperationGeneration.incrementAndGet()
     try {
+      val active = runtime.createSession()
+      if (sessionOperationGeneration.get() != generation) return
       mutableState.value = mutableState.value.copy(
-        chat = runtime.createSession().toChatState(),
+        chat = active.toChatState(),
         modelCatalog = ModelCatalog(),
         isLoadingModelOptions = false,
+        pendingModelConfirmation = null,
         error = null,
       )
     } catch (error: Throwable) {
-      mutableState.value = mutableState.value.copy(error = error.toUiError())
+      if (error is CancellationException) throw error
+      if (sessionOperationGeneration.get() == generation) {
+        mutableState.value = mutableState.value.copy(error = error.toUiError())
+      }
     }
   }
 
   suspend fun openSession(storedId: String) {
     if (storedId.isBlank()) return
+    val generation = sessionOperationGeneration.incrementAndGet()
     try {
+      val active = runtime.resumeSession(storedId)
+      if (sessionOperationGeneration.get() != generation) return
       mutableState.value = mutableState.value.copy(
-        chat = runtime.resumeSession(storedId).toChatState(),
+        chat = active.toChatState(),
         modelCatalog = ModelCatalog(),
         isLoadingModelOptions = false,
+        pendingModelConfirmation = null,
         error = null,
       )
     } catch (error: Throwable) {
-      mutableState.value = mutableState.value.copy(error = error.toUiError())
+      if (error is CancellationException) throw error
+      if (sessionOperationGeneration.get() == generation) {
+        mutableState.value = mutableState.value.copy(error = error.toUiError())
+      }
     }
   }
 
@@ -185,11 +227,11 @@ internal class ChatController(
     }
   }
 
-  suspend fun refreshModelOptions() {
+  suspend fun refreshModelOptions(forceRefresh: Boolean = false) {
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
     mutableState.value = mutableState.value.copy(isLoadingModelOptions = true)
     try {
-      val catalog = runtime.listModelOptions(runtimeId)
+      val catalog = runtime.listModelOptions(runtimeId, refresh = forceRefresh)
       if (mutableState.value.chat.runtimeSessionId != runtimeId) return
       val current = mutableState.value
       mutableState.value = current.copy(
@@ -202,6 +244,7 @@ internal class ChatController(
         error = null,
       )
     } catch (error: Throwable) {
+      if (error is CancellationException) throw error
       if (mutableState.value.chat.runtimeSessionId == runtimeId) {
         mutableState.value = mutableState.value.copy(
           isLoadingModelOptions = false,
@@ -211,25 +254,50 @@ internal class ChatController(
     }
   }
 
-  suspend fun selectModel(option: ModelOption) {
+  suspend fun selectModel(option: ModelOption, confirmExpensiveModel: Boolean = false) {
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
+    if (!confirmExpensiveModel) {
+      mutableState.value = mutableState.value.copy(pendingModelConfirmation = null)
+    }
     try {
-      runtime.selectModel(runtimeId, option.providerId, option.id)
+      val result = runtime.selectModel(
+        runtimeId,
+        option.providerId,
+        option.id,
+        confirmExpensiveModel = confirmExpensiveModel,
+      )
       if (mutableState.value.chat.runtimeSessionId != runtimeId) return
       val current = mutableState.value
-      mutableState.value = current.copy(
-        modelCatalog = current.modelCatalog.copy(
-          currentModel = option.id,
-          currentProvider = option.providerId,
-        ),
-        chat = current.chat.copy(model = option.id, provider = option.providerId),
-        error = null,
-      )
+      mutableState.value = when (result) {
+        ModelSwitchResult.Applied -> current.copy(
+          modelCatalog = current.modelCatalog.copy(
+            currentModel = option.id,
+            currentProvider = option.providerId,
+          ),
+          chat = current.chat.copy(model = option.id, provider = option.providerId),
+          pendingModelConfirmation = null,
+          error = null,
+        )
+        is ModelSwitchResult.ConfirmationRequired -> current.copy(
+          pendingModelConfirmation = PendingModelConfirmation(option, result.message),
+          error = null,
+        )
+      }
     } catch (error: Throwable) {
+      if (error is CancellationException) throw error
       if (mutableState.value.chat.runtimeSessionId == runtimeId) {
         mutableState.value = mutableState.value.copy(error = error.toUiError())
       }
     }
+  }
+
+  suspend fun confirmModelSelection() {
+    val pending = mutableState.value.pendingModelConfirmation ?: return
+    selectModel(pending.option, confirmExpensiveModel = true)
+  }
+
+  fun cancelModelSelection() {
+    mutableState.value = mutableState.value.copy(pendingModelConfirmation = null)
   }
 
   suspend fun setReasoningEffort(effort: String) {
@@ -301,6 +369,7 @@ internal class ChatController(
   }
 
   fun close() {
+    sessionOperationGeneration.incrementAndGet()
     eventJob.cancel()
     runtime.close()
   }

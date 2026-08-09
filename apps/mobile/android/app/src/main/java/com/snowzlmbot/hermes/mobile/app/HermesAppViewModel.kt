@@ -96,12 +96,20 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
     viewModelScope.launch { controller?.stop() }
   }
 
-  fun refreshModelOptions() {
-    viewModelScope.launch { controller?.refreshModelOptions() }
+  fun refreshModelOptions(forceRefresh: Boolean = false) {
+    viewModelScope.launch { controller?.refreshModelOptions(forceRefresh = forceRefresh) }
   }
 
   fun selectModel(option: ModelOption) {
     viewModelScope.launch { controller?.selectModel(option) }
+  }
+
+  fun confirmModelSelection() {
+    viewModelScope.launch { controller?.confirmModelSelection() }
+  }
+
+  fun cancelModelSelection() {
+    controller?.cancelModelSelection()
   }
 
   fun setReasoningEffort(effort: String) {

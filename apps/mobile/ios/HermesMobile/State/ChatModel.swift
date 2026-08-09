@@ -19,12 +19,17 @@ public final class ChatModel {
     public private(set) var selectedProviderID: String
     public private(set) var reasoningEffort: String
     public private(set) var modelCatalog: ModelCatalog
+    public private(set) var isLoadingModelOptions: Bool
+    public private(set) var pendingModelConfirmation: PendingModelConfirmation?
+    public private(set) var controlErrorMessage: String?
 
     @ObservationIgnored public var signalHandler: (@MainActor (ChatSignal) -> Void)?
     @ObservationIgnored private let transport: HermesGatewayTransport
     @ObservationIgnored private let archiveStore: (any SessionArchiveStore)?
     @ObservationIgnored private let sessionMutationClient: (any SessionMutationClient)?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
+    @ObservationIgnored private var sessionOperationGeneration: UInt = 0
+    @ObservationIgnored private var modelControlOperationGeneration: UInt = 0
 
     public init(
         transport: HermesGatewayTransport,
@@ -44,6 +49,9 @@ public final class ChatModel {
         self.selectedProviderID = ""
         self.reasoningEffort = ""
         self.modelCatalog = ModelCatalog()
+        self.isLoadingModelOptions = false
+        self.pendingModelConfirmation = nil
+        self.controlErrorMessage = nil
     }
 
 
@@ -54,6 +62,7 @@ public final class ChatModel {
     }
 
     public func disconnect() async {
+        sessionOperationGeneration &+= 1
         eventTask?.cancel()
         eventTask = nil
         await transport.disconnect()
@@ -61,14 +70,22 @@ public final class ChatModel {
     }
 
     public func setRuntimeSession(runtimeID: String, storedID: String) {
+        sessionOperationGeneration &+= 1
+        modelControlOperationGeneration &+= 1
         ChatReducer.reduce(
             &state,
             action: .sessionReady(runtimeID: runtimeID, storedID: storedID, messages: [])
         )
-        modelCatalog = ModelCatalog()
-        selectedModelID = ""
-        selectedProviderID = ""
-        reasoningEffort = ""
+        resetModelControlState()
+    }
+
+    private func beginSessionOperation() -> UInt {
+        sessionOperationGeneration &+= 1
+        return sessionOperationGeneration
+    }
+
+    private func isCurrentSessionOperation(_ generation: UInt) -> Bool {
+        generation == sessionOperationGeneration
     }
 
     public func loadSessions(includeArchived: Bool = false) async throws {
@@ -100,6 +117,7 @@ public final class ChatModel {
 
     @discardableResult
     public func createSession(profileID: String = "default") async throws -> ActiveSession {
+        let generation = beginSessionOperation()
         let result = try await transport.request(
             GatewayMethod.sessionCreate,
             params: [
@@ -109,6 +127,7 @@ public final class ChatModel {
             ]
         )
         let active = try GatewayProtocol.parseActiveSession(result: result)
+        guard isCurrentSessionOperation(generation) else { return active }
         applyActiveSession(active)
         insertOrUpdateSummary(
             SessionSummary(storedID: active.storedID, startedAt: Date().timeIntervalSince1970)
@@ -118,6 +137,7 @@ public final class ChatModel {
 
     @discardableResult
     public func resume(storedSessionID: String, profileID: String = "default") async throws -> ActiveSession {
+        let generation = beginSessionOperation()
         let result = try await transport.request(
             GatewayMethod.sessionResume,
             params: [
@@ -129,6 +149,7 @@ public final class ChatModel {
             ]
         )
         let active = try GatewayProtocol.parseActiveSession(result: result)
+        guard isCurrentSessionOperation(generation) else { return active }
         applyActiveSession(active)
         return active
     }
@@ -159,52 +180,112 @@ public final class ChatModel {
         ChatReducer.reduce(&state, action: .streamingChanged(false))
     }
 
-    public func loadModelOptions() async throws {
+    public func loadModelOptions(refresh: Bool = false) async throws {
         guard let runtimeID = state.runtimeSessionID else { throw ChatModelError.sessionRequired }
-        let result = try await transport.request(
-            GatewayMethod.modelOptions,
-            params: ["session_id": .string(runtimeID)]
-        )
-        guard state.runtimeSessionID == runtimeID else { return }
-        let catalog = GatewayProtocol.parseModelOptions(result: result)
-        modelCatalog = catalog
-        selectedModelID = catalog.currentModel
-        selectedProviderID = catalog.currentProvider
+        let generation = beginModelControlOperation()
+        isLoadingModelOptions = true
+        controlErrorMessage = nil
+        defer {
+            if generation == modelControlOperationGeneration {
+                isLoadingModelOptions = false
+            }
+        }
+        do {
+            let result = try await transport.request(
+                GatewayMethod.modelOptions,
+                params: [
+                    "session_id": .string(runtimeID),
+                    "refresh": .bool(refresh)
+                ]
+            )
+            guard isCurrentModelControlOperation(generation, runtimeID: runtimeID) else { return }
+            let catalog = GatewayProtocol.parseModelOptions(result: result)
+            modelCatalog = catalog
+            selectedModelID = catalog.currentModel
+            selectedProviderID = catalog.currentProvider
+        } catch {
+            if isCurrentModelControlOperation(generation, runtimeID: runtimeID) {
+                controlErrorMessage = String(localized: "error.model.options")
+            }
+            throw error
+        }
     }
 
-    public func selectModel(_ option: ModelOption) async throws {
+    @discardableResult
+    public func selectModel(
+        _ option: ModelOption,
+        confirmExpensiveModel: Bool = false
+    ) async throws -> ModelSwitchResult {
         guard let runtimeID = state.runtimeSessionID else { throw ChatModelError.sessionRequired }
-        _ = try await transport.request(
-            GatewayMethod.configSet,
-            params: [
-                "session_id": .string(runtimeID),
-                "key": .string("model"),
-                "value": .string("\(option.modelID) --provider \(option.providerID) --session")
-            ]
-        )
-        guard state.runtimeSessionID == runtimeID else { return }
-        selectedModelID = option.modelID
-        selectedProviderID = option.providerID
-        modelCatalog = ModelCatalog(
-            currentModel: option.modelID,
-            currentProvider: option.providerID,
-            providers: modelCatalog.providers
-        )
+        let generation = beginModelControlOperation()
+        controlErrorMessage = nil
+        var params: [String: JSONValue] = [
+            "session_id": .string(runtimeID),
+            "key": .string("model"),
+            "value": .string("\(option.modelID) --provider \(option.providerID) --session")
+        ]
+        if confirmExpensiveModel { params["confirm_expensive_model"] = .bool(true) }
+        do {
+            let result = try await transport.request(GatewayMethod.configSet, params: params)
+            guard isCurrentModelControlOperation(generation, runtimeID: runtimeID) else { return .applied }
+            let outcome = GatewayProtocol.parseModelSwitch(result: result)
+            switch outcome {
+            case .applied:
+                pendingModelConfirmation = nil
+                selectedModelID = option.modelID
+                selectedProviderID = option.providerID
+                modelCatalog = ModelCatalog(
+                    currentModel: option.modelID,
+                    currentProvider: option.providerID,
+                    providers: modelCatalog.providers
+                )
+            case .confirmationRequired(let message):
+                pendingModelConfirmation = PendingModelConfirmation(
+                    option: option,
+                    message: message,
+                    runtimeID: runtimeID
+                )
+            }
+            return outcome
+        } catch {
+            if isCurrentModelControlOperation(generation, runtimeID: runtimeID) {
+                controlErrorMessage = String(localized: "error.model.switch")
+            }
+            throw error
+        }
+    }
+
+    public func confirmPendingModelSelection() async throws {
+        guard let pendingModelConfirmation else { return }
+        _ = try await selectModel(pending.option, confirmExpensiveModel: true)
+    }
+
+    public func cancelPendingModelSelection() {
+        pendingModelConfirmation = nil
     }
 
     public func setReasoningEffort(_ effort: String) async throws {
         guard let runtimeID = state.runtimeSessionID else { throw ChatModelError.sessionRequired }
+        let generation = beginModelControlOperation()
         let normalized = effort.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        _ = try await transport.request(
-            GatewayMethod.configSet,
-            params: [
-                "session_id": .string(runtimeID),
-                "key": .string("reasoning"),
-                "value": .string(normalized)
-            ]
-        )
-        guard state.runtimeSessionID == runtimeID else { return }
-        reasoningEffort = normalized
+        controlErrorMessage = nil
+        do {
+            _ = try await transport.request(
+                GatewayMethod.configSet,
+                params: [
+                    "session_id": .string(runtimeID),
+                    "key": .string("reasoning"),
+                    "value": .string(normalized)
+                ]
+            )
+            guard isCurrentModelControlOperation(generation, runtimeID: runtimeID) else { return }
+            reasoningEffort = normalized
+        } catch {
+            if isCurrentModelControlOperation(generation, runtimeID: runtimeID) {
+                controlErrorMessage = String(localized: "error.model.reasoning")
+            }
+            throw error
+        }
     }
 
     public func renameCurrentSession(_ title: String) async throws {
@@ -358,6 +439,7 @@ public final class ChatModel {
             modelID: "demo-model",
             supportsReasoning: true
         )
+        resetModelControlState()
         modelCatalog = ModelCatalog(
             currentModel: demoOption.modelID,
             currentProvider: demoOption.providerID,
@@ -366,6 +448,26 @@ public final class ChatModel {
         selectedModelID = demoOption.modelID
         selectedProviderID = demoOption.providerID
         reasoningEffort = "medium"
+    }
+
+    private func beginModelControlOperation() -> UInt {
+        modelControlOperationGeneration &+= 1
+        return modelControlOperationGeneration
+    }
+
+    private func isCurrentModelControlOperation(_ generation: UInt, runtimeID: String) -> Bool {
+        generation == modelControlOperationGeneration && state.runtimeSessionID == runtimeID
+    }
+
+    private func resetModelControlState() {
+        modelControlOperationGeneration &+= 1
+        modelCatalog = ModelCatalog()
+        isLoadingModelOptions = false
+        selectedModelID = ""
+        selectedProviderID = ""
+        reasoningEffort = ""
+        pendingModelConfirmation = nil
+        controlErrorMessage = nil
     }
 
     private func applyActiveSession(_ active: ActiveSession) {
@@ -377,6 +479,7 @@ public final class ChatModel {
                 messages: active.messages
             )
         )
+        resetModelControlState()
         modelCatalog = ModelCatalog(
             currentModel: active.model,
             currentProvider: active.provider
@@ -402,8 +505,25 @@ public final class ChatModel {
         case .gatewayReady:
             ChatReducer.reduce(&state, action: .statusUpdated(String(localized: "connection.connected")))
         case .sessionInfo:
+            guard event.sessionID == nil || event.sessionID == state.runtimeSessionID else { return }
             if let running = payload["running"]?.boolValue {
                 ChatReducer.reduce(&state, action: .streamingChanged(running))
+            }
+            if let model = payload["model"]?.stringValue, !model.isEmpty {
+                selectedModelID = model
+            }
+            if let provider = payload["provider"]?.stringValue, !provider.isEmpty {
+                selectedProviderID = provider
+            }
+            if let effort = payload["reasoning_effort"]?.stringValue, !effort.isEmpty {
+                reasoningEffort = effort
+            }
+            if !selectedModelID.isEmpty || !selectedProviderID.isEmpty {
+                modelCatalog = ModelCatalog(
+                    currentModel: selectedModelID,
+                    currentProvider: selectedProviderID,
+                    providers: modelCatalog.providers
+                )
             }
             if let storedID = payload["stored_session_id"]?.stringValue,
                let runtimeID = event.sessionID,

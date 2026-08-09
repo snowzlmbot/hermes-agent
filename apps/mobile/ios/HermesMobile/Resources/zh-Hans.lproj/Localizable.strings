@@ -37,6 +37,9 @@
 "model.controls.reasoning" = "推理";
 "model.controls.none" = "此会话暂无可用模型。";
 "model.controls.reasoning.unavailable" = "当前模型不支持推理控制。";
+"model.controls.refresh" = "刷新模型";
+"model.confirm.title" = "确认切换模型";
+"model.confirm.default" = "选择此模型前需要确认。";
 "tool.generic" = "工具";
 "tool.running" = "运行中";
 "tool.complete" = "已完成";
@@ -106,6 +109,9 @@
 "error.message.stop" = "无法停止回复。";
 "error.attachment.upload" = "无法上传附件。";
 "error.gateway" = "网关报告了错误。";
+"error.model.options" = "无法加载可用模型。";
+"error.model.switch" = "无法切换模型。";
+"error.model.reasoning" = "无法更改推理等级。";
 "error.demo" = "无法准备演示模式。";
 "error.endpoint.required" = "请输入网关地址。";
 "error.endpoint.scheme" = "请使用 HTTP 或 HTTPS 网关地址。";

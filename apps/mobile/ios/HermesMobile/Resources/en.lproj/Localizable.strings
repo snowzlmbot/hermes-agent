@@ -37,6 +37,9 @@
 "model.controls.reasoning" = "Reasoning";
 "model.controls.none" = "No models are available for this session.";
 "model.controls.reasoning.unavailable" = "Reasoning controls are unavailable for this model.";
+"model.controls.refresh" = "Refresh models";
+"model.confirm.title" = "Confirm model switch";
+"model.confirm.default" = "This model requires confirmation before it can be selected.";
 "tool.generic" = "Tool";
 "tool.running" = "Running";
 "tool.complete" = "Complete";
@@ -106,6 +109,9 @@
 "error.message.stop" = "The response could not be stopped.";
 "error.attachment.upload" = "The attachment could not be uploaded.";
 "error.gateway" = "The gateway reported an error.";
+"error.model.options" = "Could not load the available models.";
+"error.model.switch" = "The model could not be changed.";
+"error.model.reasoning" = "The reasoning level could not be changed.";
 "error.demo" = "Demo mode could not be prepared.";
 "error.endpoint.required" = "Enter a gateway address.";
 "error.endpoint.scheme" = "Use an HTTP or HTTPS gateway address.";

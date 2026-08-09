@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">Hermes</string>
+  <string name="model_selected">模型：%1$s（%2$s）</string>
+  <string name="model_option">%1$s（%2$s）</string>
+  <string name="models_loading">正在加载模型…</string>
+  <string name="model_select">选择模型</string>
+  <string name="models_refresh">刷新模型</string>
+  <string name="reasoning_selected">推理：%s</string>
+  <string name="reasoning_default">中等</string>
+  <string name="model_confirmation_title">确认切换模型</string>
+  <string name="action_confirm">确认</string>
+  <string name="action_cancel">取消</string>
+</resources>

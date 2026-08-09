@@ -59,21 +59,43 @@ internal class HermesMobileRuntime(
 
   override suspend fun listSessions(): List<SessionSummary> = sessions.listSessions()
 
-  override suspend fun listModelOptions(runtimeId: String): ModelCatalog = GatewayProtocol.parseModelOptions(
-    rpc.request("model.options", runtimeParams(runtimeId)),
+  override suspend fun listModelOptions(runtimeId: String, refresh: Boolean): ModelCatalog = GatewayProtocol.parseModelOptions(
+    rpc.request(
+      "model.options",
+      buildJsonObject {
+        put("session_id", requiredRuntime(runtimeId))
+        put("refresh", refresh)
+      },
+    ),
   )
 
-  override suspend fun selectModel(runtimeId: String, provider: String, model: String) {
+  override suspend fun selectModel(
+    runtimeId: String,
+    provider: String,
+    model: String,
+    confirmExpensiveModel: Boolean,
+  ): ModelSwitchResult {
     require(provider.isNotBlank()) { "Provider is required" }
     require(model.isNotBlank()) { "Model is required" }
-    rpc.request(
+    val result = rpc.request(
       "config.set",
       buildJsonObject {
         put("session_id", requiredRuntime(runtimeId))
         put("key", "model")
         put("value", "${model.trim()} --provider ${provider.trim()} --session")
+        if (confirmExpensiveModel) put("confirm_expensive_model", true)
       },
     )
+    val confirmationRequired = (result["confirm_required"] as? JsonPrimitive)
+      ?.content
+      ?.toBooleanStrictOrNull() == true
+    if (confirmationRequired) {
+      val message = (result["confirm_message"] as? JsonPrimitive)?.content
+        ?.takeIf(String::isNotBlank)
+        ?: "Confirm model switch"
+      return ModelSwitchResult.ConfirmationRequired(message)
+    }
+    return ModelSwitchResult.Applied
   }
 
   override suspend fun setReasoningEffort(runtimeId: String, effort: String) {

@@ -4,6 +4,7 @@ struct ModelControlsSheet: View {
     let chat: ChatModel
 
     @Environment(\.dismiss) private var dismiss
+    @State private var operationError: String?
 
     private let reasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
 
@@ -21,7 +22,7 @@ struct ModelControlsSheet: View {
                     } else {
                         ForEach(modelOptions, id: \.self) { option in
                             Button {
-                                Task { try? await chat.selectModel(option) }
+                                select(option)
                             } label: {
                                 HStack(alignment: .top, spacing: 12) {
                                     VStack(alignment: .leading, spacing: 2) {
@@ -48,7 +49,7 @@ struct ModelControlsSheet: View {
                     }), selected.supportsReasoning {
                         ForEach(reasoningEfforts, id: \.self) { effort in
                             Button {
-                                Task { try? await chat.setReasoningEffort(effort) }
+                                setReasoning(effort)
                             } label: {
                                 HStack {
                                     Text(effort)
@@ -69,14 +70,98 @@ struct ModelControlsSheet: View {
             }
             .navigationTitle(String(localized: "model.controls.title"))
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        refresh()
+                    } label: {
+                        if chat.isLoadingModelOptions {
+                            ProgressView()
+                        } else {
+                            Label(String(localized: "model.controls.refresh"), systemImage: "arrow.clockwise")
+                                .labelStyle(.iconOnly)
+                        }
+                    }
+                    .disabled(chat.isLoadingModelOptions)
+                    .accessibilityLabel(String(localized: "model.controls.refresh"))
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(String(localized: "action.done")) { dismiss() }
                 }
             }
             .task {
                 if chat.modelCatalog.providers.isEmpty {
-                    try? await chat.loadModelOptions()
+                    await loadModels(refresh: false)
                 }
+            }
+            .confirmationDialog(
+                String(localized: "model.confirm.title"),
+                isPresented: Binding(
+                    get: { chat.pendingModelConfirmation != nil },
+                    set: { if !$0 { chat.cancelPendingModelSelection() } }
+                ),
+                titleVisibility: .visible,
+                presenting: chat.pendingModelConfirmation
+            ) { _ in
+                Button(String(localized: "action.continue")) { confirmSelection() }
+                Button(String(localized: "action.cancel"), role: .cancel) {
+                    chat.cancelPendingModelSelection()
+                }
+            } message: { pending in
+                Text(pending.message)
+            }
+            .alert(
+                String(localized: "error.title"),
+                isPresented: Binding(
+                    get: { operationError != nil },
+                    set: { if !$0 { operationError = nil } }
+                ),
+                presenting: operationError
+            ) { _ in
+                Button(String(localized: "action.dismiss"), role: .cancel) { operationError = nil }
+            } message: { message in
+                Text(message)
+            }
+        }
+    }
+
+    private func select(_ option: ModelOption) {
+        Task {
+            do {
+                _ = try await chat.selectModel(option)
+            } catch {
+                operationError = chat.controlErrorMessage ?? String(localized: "error.model.switch")
+            }
+        }
+    }
+
+    private func setReasoning(_ effort: String) {
+        Task {
+            do {
+                try await chat.setReasoningEffort(effort)
+            } catch {
+                operationError = chat.controlErrorMessage ?? String(localized: "error.model.reasoning")
+            }
+        }
+    }
+
+    private func refresh() {
+        Task { await loadModels(refresh: true) }
+    }
+
+    private func loadModels(refresh: Bool) async {
+        do {
+            try await chat.loadModelOptions(refresh: refresh)
+        } catch {
+            operationError = chat.controlErrorMessage ?? String(localized: "error.model.options")
+        }
+    }
+
+    private func confirmSelection() {
+        Task {
+            do {
+                try await chat.confirmPendingModelSelection()
+            } catch {
+                operationError = chat.controlErrorMessage ?? String(localized: "error.model.switch")
             }
         }
     }

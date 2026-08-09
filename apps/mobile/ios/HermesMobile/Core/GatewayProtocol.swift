@@ -6,6 +6,23 @@ public enum GatewayProtocolError: Error, Equatable, Sendable {
     case missingStoredSessionID
 }
 
+public enum ModelSwitchResult: Equatable, Sendable {
+    case applied
+    case confirmationRequired(message: String)
+}
+
+public struct PendingModelConfirmation: Equatable, Sendable {
+    public let option: ModelOption
+    public let message: String
+    public let runtimeID: String
+
+    public init(option: ModelOption, message: String, runtimeID: String) {
+        self.option = option
+        self.message = message
+        self.runtimeID = runtimeID
+    }
+}
+
 public enum MessageRole: String, Codable, Equatable, Hashable, Sendable {
     case user
     case assistant
@@ -227,6 +244,16 @@ public enum GatewayProtocol {
             provider: info["provider"]?.stringValue ?? "",
             reasoningEffort: info["reasoning_effort"]?.stringValue ?? ""
         )
+    }
+
+    public static func parseModelSwitch(result: JSONValue) -> ModelSwitchResult {
+        let root = result.object ?? [:]
+        if root["confirm_required"]?.boolValue == true {
+            let message = root["confirm_message"]?.stringValue
+                ?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .confirmationRequired(message: message?.isEmpty == false ? message! : String(localized: "model.confirm.default"))
+        }
+        return .applied
     }
 
     public static func parseModelOptions(result: JSONValue) -> ModelCatalog {
