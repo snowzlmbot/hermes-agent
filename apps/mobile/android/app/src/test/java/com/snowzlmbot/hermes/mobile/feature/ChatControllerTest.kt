@@ -206,6 +206,30 @@ class ChatControllerTest {
     assertEquals(listOf(true), runtime.modelOptionRefreshes)
   }
 
+  @Test
+  fun confirmedModelSelectionWinsOverSlowerEarlierCatalogRefresh() = runTest {
+    val runtime = RecordingRuntime().apply { delayModelOptions = true }
+    val controller = ChatController(runtime, backgroundScope)
+    controller.connect()
+    controller.newSession()
+    val option = ModelOption(
+      providerId = "fixture",
+      providerName = "Fixture",
+      id = "new-model",
+      supportsReasoning = true,
+    )
+
+    val refresh = async { controller.refreshModelOptions() }
+    runCurrent()
+    controller.selectModel(option)
+    runtime.completeModelOptions()
+    refresh.await()
+
+    assertEquals("new-model", controller.state.value.chat.model)
+    assertEquals("fixture", controller.state.value.chat.provider)
+    assertFalse(controller.state.value.isLoadingModelOptions)
+  }
+
   private class RecordingRuntime : MobileGatewayRuntime {
     override val events = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 8)
     val resumed = mutableListOf<String>()
@@ -222,7 +246,9 @@ class ChatControllerTest {
     var failPrompts = false
     var modelSwitchResult: ModelSwitchResult = ModelSwitchResult.Applied
     var delayResumes = false
+    var delayModelOptions = false
     private val pendingResumes = mutableMapOf<String, CompletableDeferred<ActiveSession>>()
+    private var pendingModelOptions: CompletableDeferred<ModelCatalog>? = null
 
     override suspend fun connect() = Unit
 
@@ -258,7 +284,7 @@ class ChatControllerTest {
     override suspend fun listModelOptions(runtimeId: String, refresh: Boolean): ModelCatalog {
       modelOptionsRequests += runtimeId
       modelOptionRefreshes += refresh
-      return ModelCatalog(
+      val catalog = ModelCatalog(
         currentModel = "fixture-model",
         currentProvider = "fixture",
         providers = listOf(
@@ -274,6 +300,20 @@ class ChatControllerTest {
               ),
             ),
           ),
+        ),
+      )
+      if (!delayModelOptions) return catalog
+      val deferred = CompletableDeferred<ModelCatalog>()
+      pendingModelOptions = deferred
+      return deferred.await()
+    }
+
+    fun completeModelOptions() {
+      pendingModelOptions?.complete(
+        ModelCatalog(
+          currentModel = "fixture-model",
+          currentProvider = "fixture",
+          providers = emptyList(),
         ),
       )
     }

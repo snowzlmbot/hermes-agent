@@ -324,6 +324,72 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(model.state.runtimeSessionID, "runtime-2")
     }
 
+    func testNewModelOperationEndsSupersededCatalogLoadingState() async throws {
+        let socket = ControlledChatSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport)
+        let selection = ModelOption(providerID: "fixture", providerName: "Fixture", modelID: "new-model")
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        let refresh = Task { try await model.loadModelOptions() }
+        _ = await socket.waitForRequests(count: 1)
+        let selectionTask = Task { try await model.selectModel(selection) }
+        let requests = await socket.waitForRequests(count: 2)
+        let selectionRequest = try XCTUnwrap(requests.first { $0.method == GatewayMethod.configSet })
+
+        await socket.pushResponse(id: selectionRequest.id, result: .object(["confirm_required": .bool(false)]))
+        _ = try await selectionTask.value
+
+        XCTAssertFalse(model.isLoadingModelOptions)
+
+        let refreshRequest = try XCTUnwrap(requests.first { $0.method == GatewayMethod.modelOptions })
+        await socket.pushResponse(id: refreshRequest.id, result: modelOptionsResult())
+        try await refresh.value
+        XCTAssertEqual(model.selectedModelID, "new-model")
+    }
+
+    func testSessionInfoModelChangeClearsPendingConfirmation() async throws {
+        let socket = ControlledChatSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport)
+        let selection = ModelOption(providerID: "fixture", providerName: "Fixture", modelID: "expensive-model")
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        let selectionTask = Task { try await model.selectModel(selection) }
+        let requests = await socket.waitForRequests(count: 1)
+        let request = try XCTUnwrap(requests.first)
+        await socket.pushResponse(
+            id: request.id,
+            result: .object([
+                "confirm_required": .bool(true),
+                "confirm_message": .string("Confirm expensive model")
+            ])
+        )
+        _ = try await selectionTask.value
+        XCTAssertNotNil(model.pendingModelConfirmation)
+
+        await socket.pushEvent(
+            GatewayEvent(
+                type: .sessionInfo,
+                sessionID: "runtime-1",
+                payload: .object([
+                    "model": .string("external-model"),
+                    "provider": .string("fixture")
+                ])
+            )
+        )
+        for _ in 0..<50 {
+            if model.selectedModelID == "external-model" { break }
+            await Task.yield()
+        }
+
+        XCTAssertNil(model.pendingModelConfirmation)
+    }
+
     func testDemoSeedProvidesModelControlsCatalog() throws {
         let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1")
         let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("demo"), socketFactory: { _ in
@@ -505,6 +571,14 @@ private func activeSessionResult(runtimeID: String, storedID: String) -> JSONVal
             "provider": .string("fixture"),
             "reasoning_effort": .string("high")
         ])
+    ])
+}
+
+private func modelOptionsResult() -> JSONValue {
+    .object([
+        "model": .string("fixture-model"),
+        "provider": .string("fixture"),
+        "providers": .array([])
     ])
 }
 

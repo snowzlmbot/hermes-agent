@@ -7,66 +7,94 @@
     "root": ".",
     "purpose": "Native iOS and Android clients for Hermes gateway sessions and agent workflows."
   },
-  "revision": 6,
+  "revision": 9,
   "phase": "executing",
-  "updatedAt": "2026-08-08T17:11:48Z",
+  "updatedAt": "2026-08-09T06:49:50Z",
   "updatedBy": {
     "runtime": "hermes",
     "profile": "default",
     "actor": "ZLMAIonebot"
   },
   "goal": "Deliver production-ready native mobile clients with secure connectivity, session management, streaming chat, model controls, tools, prompts, media, voice, notifications, localization, and adaptive layouts.",
-  "summary": "Action intent checkpointed: Push the focused review regression tests to the dedicated mobile branch to obtain candidate-specific Android and iOS RED evidence before applying the held production fixes.",
+  "summary": "Action intent checkpointed: Commit and push focused Android and iOS race regression tests without the held production fixes.",
   "done": [
     "Added native model and reasoning controls, runtime-scoped catalog resets, iOS demo capability data, and focused Android/iOS regression tests.",
     "Bound model capability rendering to confirmed runtime state and restored graph-output ignore rules.",
     "Added unknown-model capability guarding on Android and type-independent XCTest lookup for the iOS model controls entry.",
-    "Verified production config.set can return confirm_required without applying a high-cost model switch."
+    "Verified production config.set can return confirm_required without applying a high-cost model switch.",
+    "Pushed RED candidate 092833663cedc811e529bcd01527622b2df887a9; protocol validation passed, Android failed its Kotlin compile gate, and iOS failed on the newly required typed model-switch and refresh APIs.",
+    "Verified RED candidate 092833663cedc811e529bcd01527622b2df887a9 on origin/hermes-agent-Mobile-app and inspected exact-SHA Android and iOS CI failures."
   ],
   "inProgress": [
     {
-      "id": "mobile-candidate-push-v1",
-      "summary": "Commit and push the verified native mobile model-controls candidate to the dedicated branch for remote Android and iOS validation.",
+      "id": "mobile-model-race-red-v1",
+      "summary": "Commit and push focused Android and iOS race regression tests without the held production fixes.",
       "status": "in_progress",
       "sideEffect": "external",
-      "idempotencyKey": "hermes-agent-Mobile-app:model-controls:v1",
+      "idempotencyKey": "hermes-agent-Mobile-app:model-controls-race-red:v1",
       "ownerRuntime": "hermes",
-      "startedAt": "2026-08-08T16:01:08Z",
-      "verify": "Read back origin/hermes-agent-Mobile-app SHA, then require candidate-specific Mobile and Mobile Android workflow runs with matching headSha and inspect their completed jobs and artifacts.",
-      "evidence": []
-    },
-    {
-      "id": "mobile-review-red-v1",
-      "summary": "Push the focused review regression tests to the dedicated mobile branch to obtain candidate-specific Android and iOS RED evidence before applying the held production fixes.",
-      "status": "in_progress",
-      "sideEffect": "external",
-      "idempotencyKey": "hermes-agent-Mobile-app:model-controls-review-red:v1",
-      "ownerRuntime": "hermes",
-      "startedAt": "2026-08-08T17:11:48Z",
-      "verify": "Read back the dedicated branch SHA and inspect Mobile plus Mobile Android workflow runs for that exact headSha; require failures to originate from the newly required confirmation, refresh, or generation APIs rather than unrelated infrastructure.",
+      "startedAt": "2026-08-09T06:49:50Z",
+      "verify": "Read back origin/hermes-agent-Mobile-app SHA and require exact-SHA Mobile workflows to fail only on the new state-race assertions or compile-sensitive test defects.",
       "evidence": []
     }
   ],
   "next": [
-    "Add Android and iOS RED tests for confirmation-required model switches, implement explicit confirmation callbacks, then re-run independent review before push."
+    "Review local Android and iOS production fixes, push a GREEN candidate, and require exact-SHA Mobile workflows to pass."
   ],
   "blockers": [],
   "decisions": [],
-  "evidence": [],
+  "evidence": [
+    {
+      "kind": "git",
+      "ref": "092833663cedc811e529bcd01527622b2df887a9",
+      "summary": "Dedicated branch RED candidate",
+      "verifiedAt": "2026-08-08T17:39:57Z"
+    },
+    {
+      "kind": "ci",
+      "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936626",
+      "summary": "Mobile RED run for exact candidate SHA",
+      "verifiedAt": "2026-08-08T17:39:57Z"
+    },
+    {
+      "kind": "ci",
+      "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936635",
+      "summary": "Android RED run for exact candidate SHA",
+      "verifiedAt": "2026-08-08T17:39:57Z"
+    },
+    {
+      "kind": "git",
+      "ref": "092833663cedc811e529bcd01527622b2df887a9",
+      "summary": "Remote dedicated branch matches the RED candidate",
+      "verifiedAt": "2026-08-09T06:30:09Z"
+    },
+    {
+      "kind": "ci",
+      "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936626",
+      "summary": "Exact-SHA Mobile RED run inspected",
+      "verifiedAt": "2026-08-09T06:30:09Z"
+    },
+    {
+      "kind": "ci",
+      "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936635",
+      "summary": "Exact-SHA Android RED run inspected",
+      "verifiedAt": "2026-08-09T06:30:09Z"
+    }
+  ],
   "verification": {
     "status": "partial",
     "summary": "Static source/resource checks, localization parity, secret scan, diff checks, remote baseline match, and reasoning-contract parity passed; compilation and tests remain deferred to GitHub Actions.",
     "checkedAt": "2026-08-08T15:46:34Z"
   },
   "checkpoint": {
-    "id": "cp-000006",
-    "sequence": 6,
-    "reason": "action_begin:mobile-review-red-v1",
-    "at": "2026-08-08T17:11:48Z"
+    "id": "cp-000009",
+    "sequence": 9,
+    "reason": "action_begin:mobile-model-race-red-v1",
+    "at": "2026-08-09T06:49:50Z"
   },
   "recovery": {
-    "resumeHint": "Validate project state, read back origin/hermes-agent-Mobile-app before retrying, and inspect exact-headSha workflow logs for the RED candidate.",
-    "lastSafeCheckpoint": "cp-000006",
+    "resumeHint": "Validate project state, compare the remote branch SHA, and inspect exact-SHA Android/iOS CI before any retry.",
+    "lastSafeCheckpoint": "cp-000009",
     "interrupted": false,
     "interruptionReason": null,
     "requiresRevalidation": true

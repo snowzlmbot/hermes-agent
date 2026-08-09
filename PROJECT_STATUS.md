@@ -4,9 +4,9 @@
 
 - **Project:** Hermes Mobile (`hermes-mobile`)
 - **Phase:** `executing`
-- **Revision:** `6`
-- **Checkpoint:** `cp-000006`
-- **Updated:** `2026-08-08T17:11:48Z`
+- **Revision:** `9`
+- **Checkpoint:** `cp-000009`
+- **Updated:** `2026-08-09T06:49:50Z`
 - **Last writer:** `hermes/default`
 
 ## Goal
@@ -15,7 +15,7 @@ Deliver production-ready native mobile clients with secure connectivity, session
 
 ## Summary
 
-Action intent checkpointed: Push the focused review regression tests to the dedicated mobile branch to obtain candidate-specific Android and iOS RED evidence before applying the held production fixes.
+Action intent checkpointed: Commit and push focused Android and iOS race regression tests without the held production fixes.
 
 ## Done
 
@@ -23,15 +23,16 @@ Action intent checkpointed: Push the focused review regression tests to the dedi
 - Bound model capability rendering to confirmed runtime state and restored graph-output ignore rules.
 - Added unknown-model capability guarding on Android and type-independent XCTest lookup for the iOS model controls entry.
 - Verified production config.set can return confirm_required without applying a high-cost model switch.
+- Pushed RED candidate 092833663cedc811e529bcd01527622b2df887a9; protocol validation passed, Android failed its Kotlin compile gate, and iOS failed on the newly required typed model-switch and refresh APIs.
+- Verified RED candidate 092833663cedc811e529bcd01527622b2df887a9 on origin/hermes-agent-Mobile-app and inspected exact-SHA Android and iOS CI failures.
 
 ## In progress
 
-- `mobile-candidate-push-v1` [in_progress/external] — Commit and push the verified native mobile model-controls candidate to the dedicated branch for remote Android and iOS validation. (verify: Read back origin/hermes-agent-Mobile-app SHA, then require candidate-specific Mobile and Mobile Android workflow runs with matching headSha and inspect their completed jobs and artifacts.)
-- `mobile-review-red-v1` [in_progress/external] — Push the focused review regression tests to the dedicated mobile branch to obtain candidate-specific Android and iOS RED evidence before applying the held production fixes. (verify: Read back the dedicated branch SHA and inspect Mobile plus Mobile Android workflow runs for that exact headSha; require failures to originate from the newly required confirmation, refresh, or generation APIs rather than unrelated infrastructure.)
+- `mobile-model-race-red-v1` [in_progress/external] — Commit and push focused Android and iOS race regression tests without the held production fixes. (verify: Read back origin/hermes-agent-Mobile-app SHA and require exact-SHA Mobile workflows to fail only on the new state-race assertions or compile-sensitive test defects.)
 
 ## Next
 
-- Add Android and iOS RED tests for confirmation-required model switches, implement explicit confirmation callbacks, then re-run independent review before push.
+- Review local Android and iOS production fixes, push a GREEN candidate, and require exact-SHA Mobile workflows to pass.
 
 ## Blockers
 
@@ -42,7 +43,7 @@ Action intent checkpointed: Push the focused review regression tests to the dedi
 - **Interrupted:** no
 - **Interruption reason:** `none`
 - **Requires revalidation:** yes
-- **Resume hint:** Validate project state, read back origin/hermes-agent-Mobile-app before retrying, and inspect exact-headSha workflow logs for the RED candidate.
+- **Resume hint:** Validate project state, compare the remote branch SHA, and inspect exact-SHA Android/iOS CI before any retry.
 
 ## Verification
 
@@ -52,4 +53,9 @@ Action intent checkpointed: Push the focused review regression tests to the dedi
 
 ## Recent evidence
 
-- None.
+- [git] `092833663cedc811e529bcd01527622b2df887a9` — Dedicated branch RED candidate (2026-08-08T17:39:57Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936626` — Mobile RED run for exact candidate SHA (2026-08-08T17:39:57Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936635` — Android RED run for exact candidate SHA (2026-08-08T17:39:57Z)
+- [git] `092833663cedc811e529bcd01527622b2df887a9` — Remote dedicated branch matches the RED candidate (2026-08-09T06:30:09Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936626` — Exact-SHA Mobile RED run inspected (2026-08-09T06:30:09Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936635` — Exact-SHA Android RED run inspected (2026-08-09T06:30:09Z)
