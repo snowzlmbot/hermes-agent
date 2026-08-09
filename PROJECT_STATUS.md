@@ -4,9 +4,9 @@
 
 - **Project:** Hermes Mobile (`hermes-mobile`)
 - **Phase:** `executing`
-- **Revision:** `17`
-- **Checkpoint:** `cp-000017`
-- **Updated:** `2026-08-09T08:04:24Z`
+- **Revision:** `19`
+- **Checkpoint:** `cp-000019`
+- **Updated:** `2026-08-09T08:16:26Z`
 - **Last writer:** `hermes/default`
 
 ## Goal
@@ -15,7 +15,7 @@ Deliver production-ready native mobile clients with secure connectivity, session
 
 ## Summary
 
-Action intent checkpointed: Push the single Android Compose import cleanup so the focused race test executes.
+Action intent checkpointed: Push the Compose test v2 migration so the Android stale-catalog race test executes.
 
 ## Done
 
@@ -29,14 +29,15 @@ Action intent checkpointed: Push the single Android Compose import cleanup so th
 - Pushed base implementation b8fc7fd04976ff2e9c4396e2b0a5063114c1dca5; exact-SHA CI reached compilation and exposed two unrelated compiler diagnostics: Android redundant null check and Swift optional-chain ternary syntax.
 - Pushed compiler-fix candidate 1c87752567b35a82ab8e488c56d1c21142d4fab0; exact-SHA CI passed protocol and production compilation, then exposed test-fixture compile errors before race assertions: Swift binding typo and unsupported Compose assertDoesNotExist import.
 - Pushed 4acee5a00e6487b585513bafe374ff1ba5be65b5. Exact-SHA iOS simulator run executed the two new race regressions and both failed as intended; all other ChatModel and UI tests passed. Android was blocked only by an unnecessary onAllNodes import, while the rule method itself is supported.
+- Pushed 24958fbd3ef5bdc0760f04fe000917aa87475ab7; Android reached unit-test compilation and was blocked only by deprecated createComposeRule under allWarningsAsErrors. iOS race RED remained previously isolated.
 
 ## In progress
 
-- `mobile-android-race-red-v1` [in_progress/external] — Push the single Android Compose import cleanup so the focused race test executes. (verify: Read back exact branch SHA and inspect Mobile Android Unit Tests; require compilation to pass and the focused stale-catalog test to fail.)
+- `mobile-android-race-execute-v2` [in_progress/external] — Push the Compose test v2 migration so the Android stale-catalog race test executes. (verify: Read back exact branch SHA and require Android unit compilation to pass, then inspect the stale-catalog test result.)
 
 ## Next
 
-- Remove the Android onAllNodes import, rerun exact-SHA Android tests, then implement the proven Android/iOS race fixes.
+- Use Compose UI test v2 createComposeRule, rerun Android exact-SHA tests, then implement both platform race fixes.
 
 ## Blockers
 
@@ -47,7 +48,7 @@ Action intent checkpointed: Push the single Android Compose import cleanup so th
 - **Interrupted:** no
 - **Interruption reason:** `none`
 - **Requires revalidation:** yes
-- **Resume hint:** Validate state and exact remote SHA, then inspect the Android test report before implementing race logic.
+- **Resume hint:** Validate state and exact remote SHA, inspect Android test output, then change production only if the focused race assertion fails.
 
 ## Verification
 
@@ -57,8 +58,6 @@ Action intent checkpointed: Push the single Android Compose import cleanup so th
 
 ## Recent evidence
 
-- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31299826059` — Exact-SHA Android unit workflow for the test-only candidate (2026-08-09T07:03:28Z)
-- [git] `b8fc7fd04976ff2e9c4396e2b0a5063114c1dca5` — Remote base implementation candidate (2026-08-09T07:22:19Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31300483814` — Exact-SHA Mobile run; Android warning and Swift syntax failures inspected (2026-08-09T07:22:19Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31300483821` — Exact-SHA Android workflow for base candidate (2026-08-09T07:22:19Z)
 - [git] `1c87752567b35a82ab8e488c56d1c21142d4fab0` — Remote compiler-fix candidate (2026-08-09T07:35:43Z)
@@ -67,3 +66,5 @@ Action intent checkpointed: Push the single Android Compose import cleanup so th
 - [git] `4acee5a00e6487b585513bafe374ff1ba5be65b5` — Remote test execution candidate (2026-08-09T08:03:28Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31301666153` — iOS race tests executed and failed; protocol green (2026-08-09T08:03:28Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31301666156` — Android blocked by unnecessary onAllNodes import (2026-08-09T08:03:28Z)
+- [git] `24958fbd3ef5bdc0760f04fe000917aa87475ab7` — Android race candidate remote SHA (2026-08-09T08:16:06Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31302651050` — Android unit workflow; only deprecation warning blocked compilation (2026-08-09T08:16:06Z)
