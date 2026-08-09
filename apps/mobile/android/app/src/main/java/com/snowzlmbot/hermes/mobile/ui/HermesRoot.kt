@@ -241,7 +241,7 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
       },
       snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-      if (chat == null || mobile == null) {
+      if (chat == null) {
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
           Text("Preparing a conversation")
         }

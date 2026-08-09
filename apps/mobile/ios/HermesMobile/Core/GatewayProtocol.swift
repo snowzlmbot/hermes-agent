@@ -249,9 +249,11 @@ public enum GatewayProtocol {
     public static func parseModelSwitch(result: JSONValue) -> ModelSwitchResult {
         let root = result.object ?? [:]
         if root["confirm_required"]?.boolValue == true {
-            let message = root["confirm_message"]?.stringValue
-                ?.trimmingCharacters(in: .whitespacesAndNewlines)
-            return .confirmationRequired(message: message?.isEmpty == false ? message! : String(localized: "model.confirm.default"))
+            let message = root["confirm_message"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let message, !message.isEmpty {
+                return .confirmationRequired(message: message)
+            }
+            return .confirmationRequired(message: String(localized: "model.confirm.default"))
         }
         return .applied
     }
