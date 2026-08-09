@@ -4,9 +4,9 @@
 
 - **Project:** Hermes Mobile (`hermes-mobile`)
 - **Phase:** `executing`
-- **Revision:** `11`
-- **Checkpoint:** `cp-000011`
-- **Updated:** `2026-08-09T07:07:49Z`
+- **Revision:** `15`
+- **Checkpoint:** `cp-000015`
+- **Updated:** `2026-08-09T07:39:13Z`
 - **Last writer:** `hermes/default`
 
 ## Goal
@@ -15,7 +15,7 @@ Deliver production-ready native mobile clients with secure connectivity, session
 
 ## Summary
 
-Action intent checkpointed: Commit and push the held Android/iOS model-control implementation without the newly identified race fixes.
+Action intent checkpointed: Push Swift and Compose test-fixture fixes so the focused Android/iOS race regressions execute.
 
 ## Done
 
@@ -26,14 +26,16 @@ Action intent checkpointed: Commit and push the held Android/iOS model-control i
 - Pushed RED candidate 092833663cedc811e529bcd01527622b2df887a9; protocol validation passed, Android failed its Kotlin compile gate, and iOS failed on the newly required typed model-switch and refresh APIs.
 - Verified RED candidate 092833663cedc811e529bcd01527622b2df887a9 on origin/hermes-agent-Mobile-app and inspected exact-SHA Android and iOS CI failures.
 - Pushed test-only candidate 74b9e4fc3abb1bef142a1eb007cd79efd23f444f and verified exact-SHA Mobile runs; protocol passed, while prior missing model-control production APIs still blocked Android/iOS before the new race assertions executed.
+- Pushed base implementation b8fc7fd04976ff2e9c4396e2b0a5063114c1dca5; exact-SHA CI reached compilation and exposed two unrelated compiler diagnostics: Android redundant null check and Swift optional-chain ternary syntax.
+- Pushed compiler-fix candidate 1c87752567b35a82ab8e488c56d1c21142d4fab0; exact-SHA CI passed protocol and production compilation, then exposed test-fixture compile errors before race assertions: Swift binding typo and unsupported Compose assertDoesNotExist import.
 
 ## In progress
 
-- `mobile-model-controls-base-green-v1` [in_progress/external] — Commit and push the held Android/iOS model-control implementation without the newly identified race fixes. (verify: Read back the dedicated branch SHA and require exact-SHA CI to compile the typed confirmation/refresh APIs, then fail only on the focused new race assertions.)
+- `mobile-model-race-tests-execute-v1` [in_progress/external] — Push Swift and Compose test-fixture fixes so the focused Android/iOS race regressions execute. (verify: Read back exact branch SHA and require protocol green, then inspect Android/iOS jobs for the focused race test results.)
 
 ## Next
 
-- Commit the held Android/iOS model-control implementation without the new race fixes, then inspect exact-SHA CI for isolated race failures.
+- Fix the Swift pending binding and replace unsupported Compose absence assertions, then rerun exact-SHA CI.
 
 ## Blockers
 
@@ -44,7 +46,7 @@ Action intent checkpointed: Commit and push the held Android/iOS model-control i
 - **Interrupted:** no
 - **Interruption reason:** `none`
 - **Requires revalidation:** yes
-- **Resume hint:** Validate project state and remote SHA, inspect exact-SHA jobs, and do not re-push before checking whether the isolated race RED appeared.
+- **Resume hint:** Validate project state and remote SHA; inspect exact-SHA CI before changing production race logic.
 
 ## Verification
 
@@ -54,12 +56,13 @@ Action intent checkpointed: Commit and push the held Android/iOS model-control i
 
 ## Recent evidence
 
-- [git] `092833663cedc811e529bcd01527622b2df887a9` — Dedicated branch RED candidate (2026-08-08T17:39:57Z)
-- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936626` — Mobile RED run for exact candidate SHA (2026-08-08T17:39:57Z)
-- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936635` — Android RED run for exact candidate SHA (2026-08-08T17:39:57Z)
-- [git] `092833663cedc811e529bcd01527622b2df887a9` — Remote dedicated branch matches the RED candidate (2026-08-09T06:30:09Z)
-- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936626` — Exact-SHA Mobile RED run inspected (2026-08-09T06:30:09Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31268936635` — Exact-SHA Android RED run inspected (2026-08-09T06:30:09Z)
 - [git] `74b9e4fc3abb1bef142a1eb007cd79efd23f444f` — Remote dedicated branch matches the test-only race candidate (2026-08-09T07:03:28Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31299826076` — Exact-SHA Mobile run; protocol green and prior production API gaps remain RED (2026-08-09T07:03:28Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31299826059` — Exact-SHA Android unit workflow for the test-only candidate (2026-08-09T07:03:28Z)
+- [git] `b8fc7fd04976ff2e9c4396e2b0a5063114c1dca5` — Remote base implementation candidate (2026-08-09T07:22:19Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31300483814` — Exact-SHA Mobile run; Android warning and Swift syntax failures inspected (2026-08-09T07:22:19Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31300483821` — Exact-SHA Android workflow for base candidate (2026-08-09T07:22:19Z)
+- [git] `1c87752567b35a82ab8e488c56d1c21142d4fab0` — Remote compiler-fix candidate (2026-08-09T07:35:43Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31301037389` — Exact-SHA Mobile run; protocol green and test-fixture compile defects inspected (2026-08-09T07:35:43Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31301037376` — Exact-SHA Android unit workflow (2026-08-09T07:35:43Z)

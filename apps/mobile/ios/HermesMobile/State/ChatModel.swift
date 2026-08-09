@@ -256,7 +256,7 @@ public final class ChatModel {
     }
 
     public func confirmPendingModelSelection() async throws {
-        guard let pendingModelConfirmation else { return }
+        guard let pending = pendingModelConfirmation else { return }
         _ = try await selectModel(pending.option, confirmExpensiveModel: true)
     }
 

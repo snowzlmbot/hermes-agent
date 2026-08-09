@@ -5,9 +5,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -47,7 +49,7 @@ class ModelControlsTest {
       }
     }
 
-    compose.onNodeWithTag("reasoning-picker").assertDoesNotExist()
+    compose.onAllNodes(hasTestTag("reasoning-picker")).assertCountEquals(0)
     compose.onNodeWithTag("model-picker").assertIsDisplayed().performClick()
     compose.onNodeWithText("fixture-fast", substring = true).assertIsDisplayed().performClick()
     compose.onNodeWithTag("reasoning-picker").assertIsDisplayed()
@@ -74,7 +76,7 @@ class ModelControlsTest {
 
     compose.onNodeWithTag("model-picker").performClick()
     compose.onNodeWithText("fixture-fast", substring = true).performClick()
-    compose.onNodeWithTag("reasoning-picker").assertDoesNotExist()
+    compose.onAllNodes(hasTestTag("reasoning-picker")).assertCountEquals(0)
     assertEquals(listOf("fixture-fast"), selections)
   }
 
@@ -97,7 +99,7 @@ class ModelControlsTest {
 
     compose.onNodeWithTag("model-picker").assertIsDisplayed()
     compose.onNodeWithText("Select model").assertIsDisplayed()
-    compose.onNodeWithTag("reasoning-picker").assertDoesNotExist()
+    compose.onAllNodes(hasTestTag("reasoning-picker")).assertCountEquals(0)
   }
 
   private companion object {
