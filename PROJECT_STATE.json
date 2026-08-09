@@ -7,16 +7,16 @@
     "root": ".",
     "purpose": "Native iOS and Android clients for Hermes gateway sessions and agent workflows."
   },
-  "revision": 19,
+  "revision": 21,
   "phase": "executing",
-  "updatedAt": "2026-08-09T08:16:26Z",
+  "updatedAt": "2026-08-09T09:06:45Z",
   "updatedBy": {
     "runtime": "hermes",
     "profile": "default",
     "actor": "ZLMAIonebot"
   },
   "goal": "Deliver production-ready native mobile clients with secure connectivity, session management, streaming chat, model controls, tools, prompts, media, voice, notifications, localization, and adaptive layouts.",
-  "summary": "Action intent checkpointed: Push the Compose test v2 migration so the Android stale-catalog race test executes.",
+  "summary": "Action intent checkpointed: Push the isolated iOS captured-confirmation regression test to the dedicated mobile branch and verify an exact-SHA intended RED before production changes.",
   "done": [
     "Added native model and reasoning controls, runtime-scoped catalog resets, iOS demo capability data, and focused Android/iOS regression tests.",
     "Bound model capability rendering to confirmed runtime state and restored graph-output ignore rules.",
@@ -28,23 +28,24 @@
     "Pushed base implementation b8fc7fd04976ff2e9c4396e2b0a5063114c1dca5; exact-SHA CI reached compilation and exposed two unrelated compiler diagnostics: Android redundant null check and Swift optional-chain ternary syntax.",
     "Pushed compiler-fix candidate 1c87752567b35a82ab8e488c56d1c21142d4fab0; exact-SHA CI passed protocol and production compilation, then exposed test-fixture compile errors before race assertions: Swift binding typo and unsupported Compose assertDoesNotExist import.",
     "Pushed 4acee5a00e6487b585513bafe374ff1ba5be65b5. Exact-SHA iOS simulator run executed the two new race regressions and both failed as intended; all other ChatModel and UI tests passed. Android was blocked only by an unnecessary onAllNodes import, while the rule method itself is supported.",
-    "Pushed 24958fbd3ef5bdc0760f04fe000917aa87475ab7; Android reached unit-test compilation and was blocked only by deprecated createComposeRule under allWarningsAsErrors. iOS race RED remained previously isolated."
+    "Pushed 24958fbd3ef5bdc0760f04fe000917aa87475ab7; Android reached unit-test compilation and was blocked only by deprecated createComposeRule under allWarningsAsErrors. iOS race RED remained previously isolated.",
+    "Pushed df56fb7d401c2cd81a197e9b675313704d0bf594 and verified origin/hermes-agent-Mobile-app matches. GitHub Actions run 31303138104 executed 49 Android tests: the focused stale-catalog race failed as intended and ModelControlsTest reported a separate initialization error."
   ],
   "inProgress": [
     {
-      "id": "mobile-android-race-execute-v2",
-      "summary": "Push the Compose test v2 migration so the Android stale-catalog race test executes.",
+      "id": "mobile-ios-confirmation-red-v1",
+      "summary": "Push the isolated iOS captured-confirmation regression test to the dedicated mobile branch and verify an exact-SHA intended RED before production changes.",
       "status": "in_progress",
       "sideEffect": "external",
-      "idempotencyKey": "hermes-agent-Mobile-app:android-race-execute:v2",
+      "idempotencyKey": "mobile-ios-confirmation-red-v1",
       "ownerRuntime": "hermes",
-      "startedAt": "2026-08-09T08:16:26Z",
-      "verify": "Read back exact branch SHA and require Android unit compilation to pass, then inspect the stale-catalog test result.",
+      "startedAt": "2026-08-09T09:06:45Z",
+      "verify": "Read back origin/hermes-agent-Mobile-app and require the Mobile workflow headSha to match the pushed commit; inspect the iOS job diagnostic for the missing captured-confirmation API or the intended failed behavior.",
       "evidence": []
     }
   ],
   "next": [
-    "Use Compose UI test v2 createComposeRule, rerun Android exact-SHA tests, then implement both platform race fixes."
+    "Inspect Android JUnit artifact 9035128690, repair only the test environment if needed, then implement the proven Android/iOS race fixes."
   ],
   "blockers": [],
   "decisions": [],
@@ -168,6 +169,18 @@
       "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31302651050",
       "summary": "Android unit workflow; only deprecation warning blocked compilation",
       "verifiedAt": "2026-08-09T08:16:06Z"
+    },
+    {
+      "kind": "git",
+      "ref": "df56fb7d401c2cd81a197e9b675313704d0bf594",
+      "summary": "Remote dedicated branch matches the Compose v2 test candidate",
+      "verifiedAt": "2026-08-09T08:35:53Z"
+    },
+    {
+      "kind": "ci",
+      "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31303138104",
+      "summary": "Exact-SHA Android run reached unit execution; focused race RED plus one test initialization error",
+      "verifiedAt": "2026-08-09T08:35:53Z"
     }
   ],
   "verification": {
@@ -176,14 +189,14 @@
     "checkedAt": "2026-08-08T15:46:34Z"
   },
   "checkpoint": {
-    "id": "cp-000019",
-    "sequence": 19,
-    "reason": "action_begin:mobile-android-race-execute-v2",
-    "at": "2026-08-09T08:16:26Z"
+    "id": "cp-000021",
+    "sequence": 21,
+    "reason": "action_begin:mobile-ios-confirmation-red-v1",
+    "at": "2026-08-09T09:06:45Z"
   },
   "recovery": {
-    "resumeHint": "Validate state and exact remote SHA, inspect Android test output, then change production only if the focused race assertion fails.",
-    "lastSafeCheckpoint": "cp-000019",
+    "resumeHint": "If interrupted, compare local HEAD, origin/hermes-agent-Mobile-app, PROJECT_STATE revision/current_action, and exact-SHA Mobile workflow runs before retrying any push.",
+    "lastSafeCheckpoint": "cp-000021",
     "interrupted": false,
     "interruptionReason": null,
     "requiresRevalidation": true

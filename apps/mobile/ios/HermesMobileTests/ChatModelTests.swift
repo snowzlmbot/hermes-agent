@@ -192,6 +192,33 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(requests[1].params?["confirm_expensive_model"], .bool(true))
     }
 
+    func testCapturedModelConfirmationCanCompleteAfterDialogDismissal() async throws {
+        let socket = RecordingSocket(requireModelConfirmation: true)
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
+        let model = ChatModel(transport: transport)
+        let selection = ModelOption(
+            providerID: "nous",
+            providerName: "Nous",
+            modelID: "expensive-model",
+            supportsReasoning: true
+        )
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        _ = try await model.selectModel(selection)
+        let pending = try XCTUnwrap(model.pendingModelConfirmation)
+
+        model.cancelPendingModelSelection()
+        try await model.confirmModelSelection(pending)
+
+        XCTAssertEqual(model.selectedModelID, "expensive-model")
+        XCTAssertEqual(model.selectedProviderID, "nous")
+        let requests = await socket.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[1].params?["confirm_expensive_model"], .bool(true))
+    }
+
     func testFailedModelSelectionDoesNotChangeAuthoritativeState() async throws {
         let socket = RecordingSocket(failConfigSet: true)
         let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
