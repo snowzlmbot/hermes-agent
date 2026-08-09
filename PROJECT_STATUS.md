@@ -4,9 +4,9 @@
 
 - **Project:** Hermes Mobile (`hermes-mobile`)
 - **Phase:** `executing`
-- **Revision:** `25`
-- **Checkpoint:** `cp-000025`
-- **Updated:** `2026-08-09T09:47:02Z`
+- **Revision:** `27`
+- **Checkpoint:** `cp-000027`
+- **Updated:** `2026-08-09T10:00:53Z`
 - **Last writer:** `hermes/default`
 - **Last project change:** `not observed`
 - **Latest change:** Not observed.
@@ -19,7 +19,7 @@ Deliver production-ready native mobile clients with secure connectivity, session
 
 ## Summary
 
-Action intent checkpointed: Push the Java 17-compatible Robolectric SDK pin and verify the complete model-control GREEN candidate on both mobile workflows.
+Action intent checkpointed: Push the plain-Application Robolectric component-test isolation and verify the complete model-control GREEN candidate.
 
 ## Done
 
@@ -37,14 +37,15 @@ Action intent checkpointed: Push the Java 17-compatible Robolectric SDK pin and 
 - Pushed df56fb7d401c2cd81a197e9b675313704d0bf594 and verified origin/hermes-agent-Mobile-app matches. GitHub Actions run 31303138104 executed 49 Android tests: the focused stale-catalog race failed as intended and ModelControlsTest reported a separate initialization error.
 - Pushed cde5896e1c1df0d8b63d5d88f7ee14227077d1ed and read back the dedicated branch. Exact-SHA Mobile run 31305152714 passed protocol, failed iOS because ChatModel lacked confirmModelSelection(pending), and retained the known Android stale-catalog and Robolectric SDK failures.
 - Pushed and read back 0b224367eccbaf803e15861cd5b06eb7396b02a3. Exact-SHA Mobile run 31305982336 passed protocol and iOS simulator tests; Android executed 49 tests with all business tests passing, but ModelControlsTest sandbox failed because Robolectric SDK 36 requires Java 21 while CI uses Java 17. Exact-SHA Android run 31305982338 showed the same sole sandbox failure.
+- Pushed and read back 6a0e34eeb27ae8c3e02cc54c8ee1f0b2b169f5fb. Exact-SHA Mobile run 31306753447 passed protocol and iOS simulator tests. Android started 51 tests; 48 passed and all 3 ModelControlsTest methods failed before assertions because Robolectric launched production HermesApplication and AndroidKeyStore is unavailable on the JVM. Exact-SHA Android run 31306753467 reproduced the same test-only initialization failure.
 
 ## In progress
 
-- `mobile-model-race-green-v2` [in_progress/external] — Push the Java 17-compatible Robolectric SDK pin and verify the complete model-control GREEN candidate on both mobile workflows. (verify: Read back origin/hermes-agent-Mobile-app and require exact candidate SHA for Mobile and Android workflows; require protocol, Android 49 tests, lint, APK assembly, and iOS simulator tests to pass.)
+- `mobile-model-race-green-v3` [in_progress/external] — Push the plain-Application Robolectric component-test isolation and verify the complete model-control GREEN candidate. (verify: Read back origin/hermes-agent-Mobile-app and require exact candidate SHA for Mobile and Android workflows; require protocol, all Android tests, lint, APK assembly, and iOS simulator tests to pass.)
 
 ## Next
 
-- Pin the Robolectric Compose test to SDK 35, push a new exact-SHA candidate, and require Android unit, lint, APK, protocol, and iOS simulator gates to pass.
+- Configure ModelControlsTest to use a plain Application, push a new exact-SHA candidate, and require Android unit, lint, APK, protocol, and iOS simulator gates to pass.
 
 ## Blockers
 
@@ -65,9 +66,6 @@ Action intent checkpointed: Push the Java 17-compatible Robolectric SDK pin and 
 
 ## Recent evidence
 
-- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31301666156` — Android blocked by unnecessary onAllNodes import (2026-08-09T08:03:28Z)
-- [git] `24958fbd3ef5bdc0760f04fe000917aa87475ab7` — Android race candidate remote SHA (2026-08-09T08:16:06Z)
-- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31302651050` — Android unit workflow; only deprecation warning blocked compilation (2026-08-09T08:16:06Z)
 - [git] `df56fb7d401c2cd81a197e9b675313704d0bf594` — Remote dedicated branch matches the Compose v2 test candidate (2026-08-09T08:35:53Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31303138104` — Exact-SHA Android run reached unit execution; focused race RED plus one test initialization error (2026-08-09T08:35:53Z)
 - [git] `cde5896e1c1df0d8b63d5d88f7ee14227077d1ed` — Remote dedicated branch matches the isolated iOS RED candidate (2026-08-09T09:24:39Z)
@@ -75,3 +73,6 @@ Action intent checkpointed: Push the Java 17-compatible Robolectric SDK pin and 
 - [git] `0b224367eccbaf803e15861cd5b06eb7396b02a3` — Remote dedicated branch matches the first GREEN candidate (2026-08-09T09:46:51Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31305982336` — Protocol and iOS simulator green; Android isolated to Java 17 versus Robolectric SDK 36 sandbox incompatibility (2026-08-09T09:46:51Z)
 - [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31305982338` — Android business tests green with only ModelControlsTest sandbox initialization failing (2026-08-09T09:46:51Z)
+- [git] `6a0e34eeb27ae8c3e02cc54c8ee1f0b2b169f5fb` — Remote dedicated branch matches the SDK 35 candidate (2026-08-09T10:00:43Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31306753447` — Protocol and iOS simulator tests passed; Android isolated to test application AndroidKeyStore initialization (2026-08-09T10:00:43Z)
+- [ci] `https://github.com/snowzlmbot/hermes-agent/actions/runs/31306753467` — Android ran 51 tests; only three component tests failed before assertions due AndroidKeyStore unavailable on JVM (2026-08-09T10:00:43Z)

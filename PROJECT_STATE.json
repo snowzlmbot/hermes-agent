@@ -7,16 +7,16 @@
     "root": ".",
     "purpose": "Native iOS and Android clients for Hermes gateway sessions and agent workflows."
   },
-  "revision": 25,
+  "revision": 27,
   "phase": "executing",
-  "updatedAt": "2026-08-09T09:47:02Z",
+  "updatedAt": "2026-08-09T10:00:53Z",
   "updatedBy": {
     "runtime": "hermes",
     "profile": "default",
     "actor": "ZLMAIonebot"
   },
   "goal": "Deliver production-ready native mobile clients with secure connectivity, session management, streaming chat, model controls, tools, prompts, media, voice, notifications, localization, and adaptive layouts.",
-  "summary": "Action intent checkpointed: Push the Java 17-compatible Robolectric SDK pin and verify the complete model-control GREEN candidate on both mobile workflows.",
+  "summary": "Action intent checkpointed: Push the plain-Application Robolectric component-test isolation and verify the complete model-control GREEN candidate.",
   "done": [
     "Added native model and reasoning controls, runtime-scoped catalog resets, iOS demo capability data, and focused Android/iOS regression tests.",
     "Bound model capability rendering to confirmed runtime state and restored graph-output ignore rules.",
@@ -31,23 +31,24 @@
     "Pushed 24958fbd3ef5bdc0760f04fe000917aa87475ab7; Android reached unit-test compilation and was blocked only by deprecated createComposeRule under allWarningsAsErrors. iOS race RED remained previously isolated.",
     "Pushed df56fb7d401c2cd81a197e9b675313704d0bf594 and verified origin/hermes-agent-Mobile-app matches. GitHub Actions run 31303138104 executed 49 Android tests: the focused stale-catalog race failed as intended and ModelControlsTest reported a separate initialization error.",
     "Pushed cde5896e1c1df0d8b63d5d88f7ee14227077d1ed and read back the dedicated branch. Exact-SHA Mobile run 31305152714 passed protocol, failed iOS because ChatModel lacked confirmModelSelection(pending), and retained the known Android stale-catalog and Robolectric SDK failures.",
-    "Pushed and read back 0b224367eccbaf803e15861cd5b06eb7396b02a3. Exact-SHA Mobile run 31305982336 passed protocol and iOS simulator tests; Android executed 49 tests with all business tests passing, but ModelControlsTest sandbox failed because Robolectric SDK 36 requires Java 21 while CI uses Java 17. Exact-SHA Android run 31305982338 showed the same sole sandbox failure."
+    "Pushed and read back 0b224367eccbaf803e15861cd5b06eb7396b02a3. Exact-SHA Mobile run 31305982336 passed protocol and iOS simulator tests; Android executed 49 tests with all business tests passing, but ModelControlsTest sandbox failed because Robolectric SDK 36 requires Java 21 while CI uses Java 17. Exact-SHA Android run 31305982338 showed the same sole sandbox failure.",
+    "Pushed and read back 6a0e34eeb27ae8c3e02cc54c8ee1f0b2b169f5fb. Exact-SHA Mobile run 31306753447 passed protocol and iOS simulator tests. Android started 51 tests; 48 passed and all 3 ModelControlsTest methods failed before assertions because Robolectric launched production HermesApplication and AndroidKeyStore is unavailable on the JVM. Exact-SHA Android run 31306753467 reproduced the same test-only initialization failure."
   ],
   "inProgress": [
     {
-      "id": "mobile-model-race-green-v2",
-      "summary": "Push the Java 17-compatible Robolectric SDK pin and verify the complete model-control GREEN candidate on both mobile workflows.",
+      "id": "mobile-model-race-green-v3",
+      "summary": "Push the plain-Application Robolectric component-test isolation and verify the complete model-control GREEN candidate.",
       "status": "in_progress",
       "sideEffect": "external",
-      "idempotencyKey": "mobile-model-race-green-v2",
+      "idempotencyKey": "mobile-model-race-green-v3",
       "ownerRuntime": "hermes",
-      "startedAt": "2026-08-09T09:47:02Z",
-      "verify": "Read back origin/hermes-agent-Mobile-app and require exact candidate SHA for Mobile and Android workflows; require protocol, Android 49 tests, lint, APK assembly, and iOS simulator tests to pass.",
+      "startedAt": "2026-08-09T10:00:53Z",
+      "verify": "Read back origin/hermes-agent-Mobile-app and require exact candidate SHA for Mobile and Android workflows; require protocol, all Android tests, lint, APK assembly, and iOS simulator tests to pass.",
       "evidence": []
     }
   ],
   "next": [
-    "Pin the Robolectric Compose test to SDK 35, push a new exact-SHA candidate, and require Android unit, lint, APK, protocol, and iOS simulator gates to pass."
+    "Configure ModelControlsTest to use a plain Application, push a new exact-SHA candidate, and require Android unit, lint, APK, protocol, and iOS simulator gates to pass."
   ],
   "blockers": [],
   "decisions": [],
@@ -213,6 +214,24 @@
       "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31305982338",
       "summary": "Android business tests green with only ModelControlsTest sandbox initialization failing",
       "verifiedAt": "2026-08-09T09:46:51Z"
+    },
+    {
+      "kind": "git",
+      "ref": "6a0e34eeb27ae8c3e02cc54c8ee1f0b2b169f5fb",
+      "summary": "Remote dedicated branch matches the SDK 35 candidate",
+      "verifiedAt": "2026-08-09T10:00:43Z"
+    },
+    {
+      "kind": "ci",
+      "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31306753447",
+      "summary": "Protocol and iOS simulator tests passed; Android isolated to test application AndroidKeyStore initialization",
+      "verifiedAt": "2026-08-09T10:00:43Z"
+    },
+    {
+      "kind": "ci",
+      "ref": "https://github.com/snowzlmbot/hermes-agent/actions/runs/31306753467",
+      "summary": "Android ran 51 tests; only three component tests failed before assertions due AndroidKeyStore unavailable on JVM",
+      "verifiedAt": "2026-08-09T10:00:43Z"
     }
   ],
   "verification": {
@@ -221,14 +240,14 @@
     "checkedAt": "2026-08-08T15:46:34Z"
   },
   "checkpoint": {
-    "id": "cp-000025",
-    "sequence": 25,
-    "reason": "action_begin:mobile-model-race-green-v2",
-    "at": "2026-08-09T09:47:02Z"
+    "id": "cp-000027",
+    "sequence": 27,
+    "reason": "action_begin:mobile-model-race-green-v3",
+    "at": "2026-08-09T10:00:53Z"
   },
   "recovery": {
     "resumeHint": "If interrupted, compare local HEAD, remote branch, PROJECT_STATE revision/current_action, and exact-SHA workflow runs before retrying; keep ruvector.db untracked.",
-    "lastSafeCheckpoint": "cp-000025",
+    "lastSafeCheckpoint": "cp-000027",
     "interrupted": false,
     "interruptionReason": null,
     "requiresRevalidation": true
