@@ -17,6 +17,6 @@
   <string name="oauth_check_options">Check sign-in options</string>
   <string name="oauth_checking">Checking sign-in options…</string>
   <string name="oauth_sign_in_with">Sign in with %1$s</string>
-  <string name="oauth_pending">Finish sign-in in your browser, then return to Hermes.</string>
+  <string name="oauth_pending">Complete browser sign-in, then return to Hermes.</string>
   <string name="oauth_cancel">Cancel sign-in</string>
 </resources>

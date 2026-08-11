@@ -1,7 +1,6 @@
 package com.snowzlmbot.hermes.mobile
 
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -9,6 +8,7 @@ import androidx.activity.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.core.net.toUri
 import com.snowzlmbot.hermes.mobile.app.HermesAppViewModel
 import com.snowzlmbot.hermes.mobile.ui.HermesRoot
 import com.snowzlmbot.hermes.mobile.ui.HermesTheme
@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
   private fun openSystemBrowser(url: String) {
     try {
       startActivity(
-        Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE),
+        Intent(Intent.ACTION_VIEW, url.toUri()).addCategory(Intent.CATEGORY_BROWSABLE),
       )
     } catch (_: android.content.ActivityNotFoundException) {
       viewModel.reportOAuthBrowserFailure()
