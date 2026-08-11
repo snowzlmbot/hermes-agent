@@ -144,7 +144,7 @@ internal class ChatController(
 
   suspend fun connect(): Boolean {
     mutableState.value = mutableState.value.copy(phase = ConnectionPhase.CONNECTING, error = null)
-    try {
+    return try {
       runtime.connect()
       val sessions = runtime.listSessions()
       mutableState.value = mutableState.value.copy(
@@ -191,7 +191,7 @@ internal class ChatController(
       isLoadingModelOptions = false,
       pendingModelConfirmation = null,
     )
-    try {
+    return try {
       val active = runtime.createSession()
       if (sessionOperationGeneration.get() != generation) return false
       mutableState.value = mutableState.value.copy(
@@ -220,7 +220,7 @@ internal class ChatController(
       isLoadingModelOptions = false,
       pendingModelConfirmation = null,
     )
-    try {
+    return try {
       val active = runtime.resumeSession(storedId)
       if (sessionOperationGeneration.get() != generation) return false
       mutableState.value = mutableState.value.copy(
