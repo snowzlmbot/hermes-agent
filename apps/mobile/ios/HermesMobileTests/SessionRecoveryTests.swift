@@ -10,7 +10,7 @@ final class SessionRecoveryTests: XCTestCase {
             authMode: .token
         )
         let selections = InMemoryStoredSessionSelectionStore(
-            selections: [profile.id: "stored-target"]
+            selections: [profile.sessionSelectionScope: "stored-target"]
         )
         let repository = GatewayProfileRepository(
             profileStore: InMemoryGatewayProfileStore(),
