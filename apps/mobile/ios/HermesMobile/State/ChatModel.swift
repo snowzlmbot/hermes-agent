@@ -87,6 +87,15 @@ public final class ChatModel {
         resetModelControlState()
     }
 
+    public func canonicalStoredSessionID(forRuntimeSessionID runtimeSessionID: String?) -> String? {
+        guard let runtimeSessionID,
+              runtimeSessionID == state.runtimeSessionID,
+              let storedSessionID = NotificationRouteMetadata.normalizedStoredSessionID(
+                  state.storedSessionID
+              ) else { return nil }
+        return storedSessionID
+    }
+
     private func beginConnectionOperation() -> UInt {
         connectionOperationGeneration &+= 1
         return connectionOperationGeneration
@@ -728,7 +737,9 @@ public final class ChatModel {
                     status: status
                 )
             )
-            signalHandler?(.messageCompleted(sessionID: event.sessionID))
+            signalHandler?(.messageCompleted(
+                storedSessionID: canonicalStoredSessionID(forRuntimeSessionID: event.sessionID)
+            ))
         case .reasoningDelta, .thinkingDelta:
             ChatReducer.reduce(
                 &state,
@@ -777,7 +788,9 @@ public final class ChatModel {
                 choices: choices.isEmpty ? [.once, .deny] : choices
             )
             ChatReducer.reduce(&state, action: .approvalRequested(sessionID: event.sessionID, prompt: prompt))
-            signalHandler?(.approvalRequired(sessionID: event.sessionID))
+            signalHandler?(.approvalRequired(
+                storedSessionID: canonicalStoredSessionID(forRuntimeSessionID: event.sessionID)
+            ))
         case .clarifyRequest:
             let prompt = ClarifyPrompt(
                 requestID: payload["request_id"]?.stringValue ?? "",
@@ -786,7 +799,9 @@ public final class ChatModel {
                 allowsMultipleSelection: payload["multi_select"]?.boolValue ?? false
             )
             ChatReducer.reduce(&state, action: .clarifyRequested(sessionID: event.sessionID, prompt: prompt))
-            signalHandler?(.inputRequired(sessionID: event.sessionID))
+            signalHandler?(.inputRequired(
+                storedSessionID: canonicalStoredSessionID(forRuntimeSessionID: event.sessionID)
+            ))
         case .clarifyExpire:
             ChatReducer.reduce(&state, action: .clarifyResolved)
         case .secretRequest:
@@ -796,7 +811,9 @@ public final class ChatModel {
                 question: payload["prompt"]?.stringValue ?? String(localized: "secret.question")
             )
             ChatReducer.reduce(&state, action: .secretRequested(sessionID: event.sessionID, prompt: prompt))
-            signalHandler?(.inputRequired(sessionID: event.sessionID))
+            signalHandler?(.inputRequired(
+                storedSessionID: canonicalStoredSessionID(forRuntimeSessionID: event.sessionID)
+            ))
         case .secretExpire:
             ChatReducer.reduce(&state, action: .secretResolved)
         case .sudoRequest:
@@ -807,7 +824,9 @@ public final class ChatModel {
                     requestID: payload["request_id"]?.stringValue ?? ""
                 )
             )
-            signalHandler?(.inputRequired(sessionID: event.sessionID))
+            signalHandler?(.inputRequired(
+                storedSessionID: canonicalStoredSessionID(forRuntimeSessionID: event.sessionID)
+            ))
         case .sudoExpire:
             ChatReducer.reduce(&state, action: .sudoResolved)
         case .error:

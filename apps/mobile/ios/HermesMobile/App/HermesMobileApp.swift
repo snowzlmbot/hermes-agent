@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct HermesMobileApp: App {
+    @UIApplicationDelegateAdaptor(NotificationAppDelegate.self) private var appDelegate
     @Environment(\.scenePhase) private var scenePhase
     @State private var appModel = AppModel()
 
@@ -9,7 +10,10 @@ struct HermesMobileApp: App {
         WindowGroup {
             HermesRootView()
                 .environment(appModel)
-                .task { await appModel.bootstrap() }
+                .task {
+                    await appDelegate.install(appModel: appModel)
+                    await appModel.bootstrap()
+                }
                 .onChange(of: scenePhase) { _, nextPhase in
                     switch nextPhase {
                     case .active:

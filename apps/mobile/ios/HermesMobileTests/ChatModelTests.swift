@@ -417,6 +417,64 @@ final class ChatModelTests: XCTestCase {
         XCTAssertNil(model.pendingModelConfirmation)
     }
 
+    func testNotificationSignalsMapRuntimeEventsToCanonicalStoredIdentity() async throws {
+        let socket = ControlledChatSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .token("token"),
+            socketFactory: { _ in socket }
+        )
+        let model = ChatModel(transport: transport)
+        var signals: [ChatSignal] = []
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-canonical")
+        model.signalHandler = { signals.append($0) }
+
+        await socket.pushEvent(GatewayEvent(
+            type: .messageComplete,
+            sessionID: "runtime-1",
+            payload: .object([
+                "status": .string("complete"),
+                "text": .string("private response body")
+            ])
+        ))
+        await socket.pushEvent(GatewayEvent(
+            type: .approvalRequest,
+            sessionID: "runtime-1",
+            payload: .object([
+                "request_id": .string("approval-1"),
+                "command": .string("private command")
+            ])
+        ))
+        await socket.pushEvent(GatewayEvent(
+            type: .clarifyRequest,
+            sessionID: "runtime-1",
+            payload: .object([
+                "request_id": .string("clarify-1"),
+                "question": .string("private prompt")
+            ])
+        ))
+        await socket.pushEvent(GatewayEvent(
+            type: .messageComplete,
+            sessionID: "runtime-stale",
+            payload: .object(["status": .string("complete")])
+        ))
+
+        for _ in 0..<100 {
+            if signals.count == 4 { break }
+            await Task.yield()
+        }
+
+        XCTAssertEqual(signals, [
+            .messageCompleted(storedSessionID: "stored-canonical"),
+            .approvalRequired(storedSessionID: "stored-canonical"),
+            .inputRequired(storedSessionID: "stored-canonical"),
+            .messageCompleted(storedSessionID: nil)
+        ])
+    }
+
     func testDemoSeedProvidesModelControlsCatalog() throws {
         let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1")
         let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("demo"), socketFactory: { _ in

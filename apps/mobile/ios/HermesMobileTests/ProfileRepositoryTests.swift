@@ -130,7 +130,7 @@ private actor FailingDeleteCredentialStore: CredentialStore {
 
 private actor NoopNotificationService: NotificationScheduling {
     func requestAuthorization() async -> Bool { true }
-    func scheduleCompletion(sessionTitle: String, sessionID: String?) async {}
-    func scheduleApproval(sessionID: String) async {}
-    func scheduleInput(sessionID: String) async {}
+    func scheduleCompletion(sessionTitle: String, route: NotificationRoute) async {}
+    func scheduleApproval(route: NotificationRoute) async {}
+    func scheduleInput(route: NotificationRoute) async {}
 }
