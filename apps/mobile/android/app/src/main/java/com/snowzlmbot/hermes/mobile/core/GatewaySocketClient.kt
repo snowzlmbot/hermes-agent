@@ -233,7 +233,6 @@ class GatewaySocketClient(
     synchronized(socketLock) {
       !permanentlyClosed && connectionGeneration == generation && socket === candidate
     }
-  }
 
   private fun failPending(error: Throwable) {
     pending.values.forEach { it.completeExceptionally(error) }
