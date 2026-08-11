@@ -1,6 +1,7 @@
 package com.snowzlmbot.hermes.mobile.app
 
 import com.snowzlmbot.hermes.mobile.core.GatewayAuthMode
+import com.snowzlmbot.hermes.mobile.core.GatewayAuthCoordinator
 import com.snowzlmbot.hermes.mobile.core.GatewayConnection
 import com.snowzlmbot.hermes.mobile.core.GatewayProfile
 import com.snowzlmbot.hermes.mobile.core.GatewayProfileRepository
@@ -8,6 +9,7 @@ import com.snowzlmbot.hermes.mobile.core.GatewayRestClient
 import com.snowzlmbot.hermes.mobile.core.GatewaySocketClient
 import com.snowzlmbot.hermes.mobile.core.RestCredential
 import com.snowzlmbot.hermes.mobile.core.SecretValue
+import com.snowzlmbot.hermes.mobile.core.StoredGatewayAuth
 import com.snowzlmbot.hermes.mobile.feature.HermesMobileRuntime
 import com.snowzlmbot.hermes.mobile.feature.RestMobileSessionSource
 
@@ -20,15 +22,30 @@ internal class AppGraph(
     connections.save(profile, secret)
   }
 
+  suspend fun saveConnection(profile: GatewayProfile, auth: StoredGatewayAuth) {
+    connections.save(profile, auth)
+  }
+
   suspend fun clearConnection() {
     connections.clear()
   }
 
   fun runtime(connection: GatewayConnection): HermesMobileRuntime {
     val endpoint = connection.endpoint()
+    if (connection.profile.authMode == GatewayAuthMode.OAUTH) {
+      val auth = GatewayAuthCoordinator(connection, connections)
+      return HermesMobileRuntime(
+        socket = GatewaySocketClient(
+          endpoint = endpoint,
+          credentialProvider = auth::socketCredential,
+        ),
+        sessions = RestMobileSessionSource(auth.restClient()),
+      )
+    }
     val restCredential = when (connection.profile.authMode) {
       GatewayAuthMode.TOKEN -> RestCredential.StaticToken(connection.secret)
       GatewayAuthMode.TICKET -> null
+      GatewayAuthMode.OAUTH -> error("OAuth handled above")
     }
     val rest = GatewayRestClient(endpoint, restCredential)
     val socket = GatewaySocketClient(

@@ -51,6 +51,29 @@ data class GatewayStatus(
   }
 }
 
+data class NativeOAuthProvider(
+  val name: String,
+  val displayName: String,
+) {
+  companion object {
+    fun parseList(element: JsonElement): List<NativeOAuthProvider> {
+      val root = element as? JsonObject ?: return emptyList()
+      return (root["providers"] as? JsonArray).orEmpty().mapNotNull providerLoop@ { item ->
+        val provider = item as? JsonObject ?: return@providerLoop null
+        if (provider["supports_password"]?.jsonPrimitive?.booleanOrNull == true) {
+          return@providerLoop null
+        }
+        val name = provider.string("name")?.trim()?.takeIf(String::isNotEmpty)
+          ?: return@providerLoop null
+        NativeOAuthProvider(
+          name = name,
+          displayName = provider.string("display_name")?.trim()?.takeIf(String::isNotEmpty) ?: name,
+        )
+      }.distinctBy(NativeOAuthProvider::name)
+    }
+  }
+}
+
 class NativeAuthException(message: String) : IllegalArgumentException(message)
 
 class NativePkce private constructor(

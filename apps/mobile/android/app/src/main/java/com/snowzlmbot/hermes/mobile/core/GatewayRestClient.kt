@@ -48,6 +48,7 @@ class GatewayRestClient(
   private val endpoint: GatewayEndpoint,
   private val credential: RestCredential? = null,
   private val httpClient: OkHttpClient = OkHttpClient(),
+  private val credentialProvider: RestCredentialProvider? = null,
 ) {
   private val json = Json { ignoreUnknownKeys = true }
 
@@ -57,8 +58,20 @@ class GatewayRestClient(
         .url(endpoint.httpBaseUrl.newBuilder().addPathSegments("api/status").build())
         .get()
         .build(),
+      authenticate = false,
     )
     return GatewayStatus.parse(parseObject(body))
+  }
+
+  suspend fun nativeOAuthProviders(): List<NativeOAuthProvider> {
+    val body = execute(
+      Request.Builder()
+        .url(endpoint.httpBaseUrl.newBuilder().addPathSegments("api/auth/providers").build())
+        .get()
+        .build(),
+      authenticate = false,
+    )
+    return NativeOAuthProvider.parseList(json.parseToJsonElement(body))
   }
 
   suspend fun mintWebSocketTicket(): SecretValue {
@@ -77,8 +90,8 @@ class GatewayRestClient(
       Request.Builder()
         .url(url)
         .get()
-        .apply { applyCredential() }
         .build(),
+      authenticate = true,
     )
     return GatewayProtocol.parseSessionList(parseObject(body))
   }
@@ -102,8 +115,8 @@ class GatewayRestClient(
         Request.Builder()
           .url(sessionUrl(cleanId))
           .patch(body.toString().toRequestBody(JSON_MEDIA_TYPE))
-          .apply { applyCredential() }
           .build(),
+        authenticate = true,
       ),
     )
     return SessionUpdateResult(
@@ -120,8 +133,8 @@ class GatewayRestClient(
       Request.Builder()
         .url(sessionUrl(cleanId))
         .delete()
-        .apply { applyCredential() }
         .build(),
+      authenticate = true,
     )
   }
 
@@ -193,13 +206,14 @@ class GatewayRestClient(
     val request = Request.Builder()
       .url(endpoint.httpBaseUrl.newBuilder().addPathSegments(path).build())
       .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
-      .apply { if (authenticate) applyCredential() }
       .build()
-    return parseObject(execute(request))
+    return parseObject(execute(request, authenticate))
   }
 
-  private fun Request.Builder.applyCredential() {
-    when (val current = credential) {
+  private fun Request.Builder.applyCredential(current: RestCredential?) {
+    removeHeader("Authorization")
+    removeHeader("X-Hermes-Session-Token")
+    when (current) {
       is RestCredential.StaticToken -> {
         header("X-Hermes-Session-Token", current.value.reveal())
         header("Authorization", "Bearer ${current.value.reveal()}")
@@ -214,7 +228,26 @@ class GatewayRestClient(
     .addPathSegment(storedId)
     .build()
 
-  private suspend fun execute(request: Request): String = withContext(Dispatchers.IO) {
+  private suspend fun execute(request: Request, authenticate: Boolean): String {
+    val initialCredential = if (authenticate) {
+      credentialProvider?.credential() ?: credential
+    } else {
+      null
+    }
+    return try {
+      executeOnce(request.withCredential(initialCredential))
+    } catch (error: GatewayHttpException) {
+      if (error.statusCode != 401 || !authenticate || credentialProvider == null) throw error
+      val refreshedCredential = credentialProvider.refreshAfterUnauthorized(initialCredential) ?: throw error
+      executeOnce(request.withCredential(refreshedCredential))
+    }
+  }
+
+  private fun Request.withCredential(current: RestCredential?): Request = newBuilder()
+    .apply { applyCredential(current) }
+    .build()
+
+  private suspend fun executeOnce(request: Request): String = withContext(Dispatchers.IO) {
     httpClient.newCall(request).execute().use { response ->
       val responseBody = response.body.string()
       if (!response.isSuccessful) {

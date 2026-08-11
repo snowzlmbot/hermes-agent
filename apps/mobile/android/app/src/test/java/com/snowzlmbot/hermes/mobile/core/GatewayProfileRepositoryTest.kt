@@ -22,7 +22,10 @@ class GatewayProfileRepositoryTest {
     repository.save(profile, SecretValue("private-token"))
 
     assertEquals(profile, profiles.profile)
-    assertEquals(SecretValue("private-token"), credentials.secret)
+    assertEquals(
+      StoredGatewayAuth.StaticToken(SecretValue("private-token")),
+      credentials.auth,
+    )
     assertFalse(profiles.serializedValues().contains("private-token"))
     assertEquals(GatewayConnection(profile, SecretValue("private-token")), repository.load())
   }
@@ -41,7 +44,7 @@ class GatewayProfileRepositoryTest {
 
     assertNull(repository.load())
     assertNull(profiles.profile)
-    assertNull(credentials.secret)
+    assertNull(credentials.auth)
     assertTrue(credentials.clearCount > 0)
   }
 
@@ -62,18 +65,18 @@ class GatewayProfileRepositoryTest {
   }
 
   private class FakeCredentialStore : CredentialStore {
-    var secret: SecretValue? = null
+    var auth: StoredGatewayAuth? = null
     var clearCount: Int = 0
 
-    override suspend fun load(): SecretValue? = secret
+    override suspend fun load(): StoredGatewayAuth? = auth
 
-    override suspend fun save(secret: SecretValue) {
-      this.secret = secret
+    override suspend fun save(auth: StoredGatewayAuth) {
+      this.auth = auth
     }
 
     override suspend fun clear() {
       clearCount += 1
-      secret = null
+      auth = null
     }
   }
 }

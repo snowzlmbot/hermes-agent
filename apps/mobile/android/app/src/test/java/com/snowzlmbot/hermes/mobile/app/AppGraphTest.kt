@@ -6,6 +6,7 @@ import com.snowzlmbot.hermes.mobile.core.GatewayProfile
 import com.snowzlmbot.hermes.mobile.core.GatewayProfileRepository
 import com.snowzlmbot.hermes.mobile.core.ProfileStore
 import com.snowzlmbot.hermes.mobile.core.SecretValue
+import com.snowzlmbot.hermes.mobile.core.StoredGatewayAuth
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -59,16 +60,16 @@ class AppGraphTest {
   }
 
   private class RecordingCredentialStore : CredentialStore {
-    private var secret: SecretValue? = null
+    private var auth: StoredGatewayAuth? = null
 
-    override suspend fun load(): SecretValue? = secret
+    override suspend fun load(): StoredGatewayAuth? = auth
 
-    override suspend fun save(secret: SecretValue) {
-      this.secret = secret
+    override suspend fun save(auth: StoredGatewayAuth) {
+      this.auth = auth
     }
 
     override suspend fun clear() {
-      secret = null
+      auth = null
     }
   }
 }

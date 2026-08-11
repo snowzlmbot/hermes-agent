@@ -1,6 +1,7 @@
 package com.snowzlmbot.hermes.mobile.core
 
 import java.time.Instant
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -54,7 +55,7 @@ class AndroidOAuthFlowTest {
   }
 
   @Test
-  fun refreshesBeforeMintingSingleUseWebSocketTicket() = runTest {
+  fun refreshesBeforeMintingSingleUseWebSocketTicket() = runBlocking {
     server.enqueue(MockResponse().setBody("""{"access_token":"new-access","refresh_token":"new-refresh","expires_at":20000,"provider":"nous","user_id":"user-1"}"""))
     server.enqueue(MockResponse().setBody("""{"ticket":"fresh-ticket"}"""))
     val repository = GatewayProfileRepository(FakeProfileStore(), FakeCredentialStore())
