@@ -18,6 +18,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -35,6 +36,73 @@ class ChatControllerTest {
     assertEquals("stored-1", controller.state.value.chat.storedSessionId)
     assertEquals("runtime-resumed", controller.state.value.chat.runtimeSessionId)
     assertEquals(listOf("stored-1"), runtime.resumed)
+  }
+
+  @Test
+  fun restoreListsThenResumesOnlyPersistedStoredIdentity() = runTest {
+    val runtime = RecordingRuntime().apply {
+      listedSessions = listOf(summary("stored-kept"), summary("stored-other"))
+    }
+    val selection = RecordingSessionSelectionStore("stored-kept")
+    val controller = ChatController(runtime, backgroundScope, selection)
+
+    assertTrue(controller.connectAndRestore())
+
+    assertEquals(listOf("list", "resume:stored-kept"), runtime.lifecycleCalls)
+    assertEquals("stored-kept", controller.state.value.chat.storedSessionId)
+    assertEquals("runtime-resumed", controller.state.value.chat.runtimeSessionId)
+    assertEquals("stored-kept", selection.storedSessionId)
+  }
+
+  @Test
+  fun restoreWithoutPersistedIdentityKeepsNewSessionBehavior() = runTest {
+    val runtime = RecordingRuntime()
+    val selection = RecordingSessionSelectionStore()
+    val controller = ChatController(runtime, backgroundScope, selection)
+
+    assertTrue(controller.connectAndRestore())
+
+    assertEquals(listOf("list", "create"), runtime.lifecycleCalls)
+    assertEquals("stored-new", selection.storedSessionId)
+    assertEquals("runtime-new", controller.state.value.chat.runtimeSessionId)
+  }
+
+  @Test
+  fun failedDirectedRestoreIsNonDestructiveAndRetryable() = runTest {
+    val runtime = RecordingRuntime().apply {
+      listedSessions = listOf(summary("stored-kept"))
+      failResumes = true
+    }
+    val selection = RecordingSessionSelectionStore("stored-kept")
+    val controller = ChatController(runtime, backgroundScope, selection)
+
+    assertFalse(controller.connectAndRestore())
+
+    assertEquals("stored-kept", selection.storedSessionId)
+    assertNull(controller.state.value.chat.runtimeSessionId)
+    assertTrue(controller.state.value.error?.retryable == true)
+
+    runtime.failResumes = false
+    assertTrue(controller.connectAndRestore())
+    assertEquals(listOf("stored-kept", "stored-kept"), runtime.resumed)
+  }
+
+  @Test
+  fun staleResumeCannotPersistOrReplaceNewerSession() = runTest {
+    val runtime = RecordingRuntime().apply { delayResumes = true }
+    val selection = RecordingSessionSelectionStore("stored-old")
+    val controller = ChatController(runtime, backgroundScope, selection)
+    controller.connect()
+
+    val stale = async { controller.openSession("stored-old") }
+    runCurrent()
+    controller.newSession()
+    runtime.completeResume("stored-old", "runtime-old")
+    stale.await()
+
+    assertEquals("stored-new", controller.state.value.chat.storedSessionId)
+    assertEquals("runtime-new", controller.state.value.chat.runtimeSessionId)
+    assertEquals("stored-new", selection.storedSessionId)
   }
 
   @Test
@@ -232,6 +300,7 @@ class ChatControllerTest {
 
   private class RecordingRuntime : MobileGatewayRuntime {
     override val events = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 8)
+    val lifecycleCalls = mutableListOf<String>()
     val resumed = mutableListOf<String>()
     val prompts = mutableListOf<Pair<String, String>>()
     val interrupted = mutableListOf<String>()
@@ -244,6 +313,7 @@ class ChatControllerTest {
     var listedSessions = listOf(summary("stored-1"))
     var sessionListRequests = 0
     var failPrompts = false
+    var failResumes = false
     var modelSwitchResult: ModelSwitchResult = ModelSwitchResult.Applied
     var delayResumes = false
     var delayModelOptions = false
@@ -253,14 +323,20 @@ class ChatControllerTest {
     override suspend fun connect() = Unit
 
     override suspend fun listSessions(): List<SessionSummary> {
+      lifecycleCalls += "list"
       sessionListRequests += 1
       return listedSessions
     }
 
-    override suspend fun createSession(): ActiveSession = active("runtime-new", "stored-new")
+    override suspend fun createSession(): ActiveSession {
+      lifecycleCalls += "create"
+      return active("runtime-new", "stored-new")
+    }
 
     override suspend fun resumeSession(storedId: String): ActiveSession {
+      lifecycleCalls += "resume:$storedId"
       resumed += storedId
+      if (failResumes) error("gateway unavailable")
       if (delayResumes) {
         return pendingResumes.getOrPut(storedId) { CompletableDeferred() }.await()
       }
@@ -369,5 +445,22 @@ class ChatControllerTest {
       provider = "fixture",
       reasoningEffort = "max",
     )
+  }
+
+  private class RecordingSessionSelectionStore(
+    initialStoredSessionId: String? = null,
+  ) : StoredSessionSelectionStore {
+    var storedSessionId: String? = initialStoredSessionId
+      private set
+
+    override fun load(): String? = storedSessionId
+
+    override fun save(storedSessionId: String) {
+      this.storedSessionId = storedSessionId
+    }
+
+    override fun clear() {
+      storedSessionId = null
+    }
   }
 }

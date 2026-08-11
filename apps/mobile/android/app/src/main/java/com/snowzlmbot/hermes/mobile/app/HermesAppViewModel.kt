@@ -3,6 +3,9 @@ package com.snowzlmbot.hermes.mobile.app
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
 import com.snowzlmbot.hermes.mobile.core.GatewayAuthMode
 import com.snowzlmbot.hermes.mobile.core.GatewayEndpoint
@@ -15,6 +18,7 @@ import com.snowzlmbot.hermes.mobile.core.PendingNativeOAuth
 import com.snowzlmbot.hermes.mobile.core.SecretValue
 import com.snowzlmbot.hermes.mobile.core.StoredGatewayAuth
 import com.snowzlmbot.hermes.mobile.feature.ChatController
+import com.snowzlmbot.hermes.mobile.feature.AndroidStoredSessionSelectionStore
 import com.snowzlmbot.hermes.mobile.feature.MobileChatUiState
 import com.snowzlmbot.hermes.mobile.platform.AttachmentPayload
 import java.io.ByteArrayOutputStream
@@ -55,11 +59,25 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
   private var oauthCallbackInFlight = false
   private var oauthGeneration = 0L
   private val oauthBrowserChannel = Channel<String>(Channel.BUFFERED)
+  private var foregroundRecoveryArmed = false
+  private val processLifecycleObserver = object : DefaultLifecycleObserver {
+    override fun onStop(owner: LifecycleOwner) {
+      foregroundRecoveryArmed = true
+      nextConnectionGeneration()
+    }
+
+    override fun onStart(owner: LifecycleOwner) {
+      if (!foregroundRecoveryArmed) return
+      foregroundRecoveryArmed = false
+      startConnectSaved()
+    }
+  }
 
   val state: StateFlow<AppUiState> = mutableState.asStateFlow()
   val oauthBrowserEvents = oauthBrowserChannel.receiveAsFlow()
 
   init {
+    ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleObserver)
     startConnectSaved()
   }
 
@@ -245,6 +263,9 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       controller = null
       chatCollection?.cancel()
       chatCollection = null
+      graph.restoreConnection()?.profile?.address?.let { address ->
+        AndroidStoredSessionSelectionStore(getApplication<Application>(), address).clear()
+      }
       graph.clearConnection()
       if (isCurrentConnection(generation)) {
         mutableState.value = AppUiState(screen = AppScreen.ONBOARDING)
@@ -347,6 +368,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
   }
 
   override fun onCleared() {
+    ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycleObserver)
     nextConnectionGeneration()
     resetOAuthFlow()
     oauthBrowserChannel.close()
@@ -366,6 +388,10 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
   }
 
   private fun startConnectSaved() {
+    controller?.close()
+    controller = null
+    chatCollection?.cancel()
+    chatCollection = null
     val generation = nextConnectionGeneration()
     connectJob = viewModelScope.launch {
       try {
@@ -389,14 +415,17 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       mutableState.value = AppUiState(screen = AppScreen.ONBOARDING)
       return
     }
-    val next = ChatController(graph.runtime(connection), viewModelScope)
+    val next = ChatController(
+      runtime = graph.runtime(connection),
+      scope = viewModelScope,
+      selectionStore = AndroidStoredSessionSelectionStore(getApplication<Application>(), connection.profile.address),
+    )
     var installed = false
     try {
       if (!isCurrentConnection(generation)) return
-      next.connect()
+      val restored = next.connectAndRestore()
       if (!isCurrentConnection(generation)) return
-      if (next.state.value.chat.runtimeSessionId == null) next.newSession()
-      if (!isCurrentConnection(generation)) return
+      check(restored) { next.state.value.error?.message ?: "Could not restore the saved session" }
 
       val previous = controller
       installed = true
