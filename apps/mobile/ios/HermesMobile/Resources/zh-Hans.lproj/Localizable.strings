@@ -88,7 +88,7 @@
 "action.more" = "更多操作";
 "delete.session.title" = "删除会话？";
 "delete.session.message" = "这将永久删除已保存的对话记录。";
-"notification.completion.body" = "%@ 已准备就绪";
+"notification.completion.body" = "回复已准备就绪";
 "notification.approval.body" = "一个会话需要你的批准";
 "notification.input.body" = "一个会话正在等待输入";
 "audio.microphone.error" = "录制语音需要麦克风权限。";

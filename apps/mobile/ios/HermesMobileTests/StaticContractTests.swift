@@ -38,5 +38,12 @@ final class StaticContractTests: XCTestCase {
         XCTAssertTrue(contract.eventTypes.contains(.messageDelta))
         XCTAssertEqual(contract.requestExample["jsonrpc"], .string("2.0"))
         XCTAssertEqual(contract.eventExample["method"], .string("event"))
+        XCTAssertEqual(contract.notificationRouting.identityField, "stored_session_id")
+        XCTAssertEqual(Set(contract.notificationRouting.allowedFields), ["stored_session_id", "profile_scope"])
+        XCTAssertEqual(contract.notificationRouting.profileScopeEncoding, "sha256_hex_lowercase")
+        XCTAssertEqual(contract.notificationRouting.profileScopeInput, "session_selection_scope")
+        XCTAssertEqual(contract.notificationRouting.scopeMismatchAction, "discard")
+        XCTAssertTrue(contract.notificationRouting.singleConsume)
+        XCTAssertTrue(contract.notificationRouting.forbiddenFields.contains("session_id"))
     }
 }
