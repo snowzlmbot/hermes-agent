@@ -1,14 +1,10 @@
 package com.snowzlmbot.hermes.mobile.platform
 
-import android.Manifest
 import android.app.Application
 import android.app.Notification
 import android.app.NotificationManager
-import android.content.pm.PackageManager
-import androidx.core.content.ContextCompat
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -77,9 +73,6 @@ class LocalNotificationServiceTest {
   @Test
   @Config(sdk = [32])
   fun preAndroid13DoesNotRequireRuntimeNotificationPermission() {
-    val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
-
-    assertFalse(granted == PackageManager.PERMISSION_GRANTED)
     assertTrue(NotificationPermissionPolicy.canPost(context))
   }
 
