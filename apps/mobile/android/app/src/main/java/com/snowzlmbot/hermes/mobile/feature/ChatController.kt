@@ -2,6 +2,7 @@ package com.snowzlmbot.hermes.mobile.feature
 
 import com.snowzlmbot.hermes.mobile.core.ActiveSession
 import com.snowzlmbot.hermes.mobile.core.GatewayEvent
+import com.snowzlmbot.hermes.mobile.core.GatewayRpcException
 import com.snowzlmbot.hermes.mobile.core.ModelCatalog
 import com.snowzlmbot.hermes.mobile.core.ModelOption
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
@@ -114,6 +115,7 @@ internal interface MobileGatewayRuntime {
 internal class ChatController(
   private val runtime: MobileGatewayRuntime,
   scope: CoroutineScope,
+  private val selectionStore: StoredSessionSelectionStore = EmptyStoredSessionSelectionStore,
 ) {
   private val mutableState = MutableStateFlow(MobileChatUiState())
   private val sessionOperationGeneration = AtomicLong(0)
@@ -140,7 +142,7 @@ internal class ChatController(
 
   val state: StateFlow<MobileChatUiState> = mutableState.asStateFlow()
 
-  suspend fun connect() {
+  suspend fun connect(): Boolean {
     mutableState.value = mutableState.value.copy(phase = ConnectionPhase.CONNECTING, error = null)
     try {
       runtime.connect()
@@ -150,12 +152,25 @@ internal class ChatController(
         sessions = sessions.sortedForDisplay(),
         error = null,
       )
+      true
     } catch (error: Throwable) {
       mutableState.value = mutableState.value.copy(
         phase = ConnectionPhase.DISCONNECTED,
         error = error.toUiError(),
       )
+      false
     }
+  }
+
+  suspend fun connectAndRestore(): Boolean {
+    if (!connect()) return false
+    val storedId = selectionStore.load()?.takeIf(String::isNotBlank)
+      ?: return newSession()
+    if (mutableState.value.sessions.none { it.storedId == storedId }) {
+      selectionStore.clear()
+      return newSession()
+    }
+    return openSession(storedId)
   }
 
   suspend fun refreshSessions() {
@@ -169,7 +184,7 @@ internal class ChatController(
     }
   }
 
-  suspend fun newSession() {
+  suspend fun newSession(): Boolean {
     val generation = sessionOperationGeneration.incrementAndGet()
     modelControlOperationGeneration.incrementAndGet()
     mutableState.value = mutableState.value.copy(
@@ -178,7 +193,7 @@ internal class ChatController(
     )
     try {
       val active = runtime.createSession()
-      if (sessionOperationGeneration.get() != generation) return
+      if (sessionOperationGeneration.get() != generation) return false
       mutableState.value = mutableState.value.copy(
         chat = active.toChatState(),
         modelCatalog = ModelCatalog(),
@@ -186,16 +201,19 @@ internal class ChatController(
         pendingModelConfirmation = null,
         error = null,
       )
+      selectionStore.save(active.storedId)
+      true
     } catch (error: Throwable) {
       if (error is CancellationException) throw error
       if (sessionOperationGeneration.get() == generation) {
         mutableState.value = mutableState.value.copy(error = error.toUiError())
       }
+      false
     }
   }
 
-  suspend fun openSession(storedId: String) {
-    if (storedId.isBlank()) return
+  suspend fun openSession(storedId: String): Boolean {
+    if (storedId.isBlank()) return false
     val generation = sessionOperationGeneration.incrementAndGet()
     modelControlOperationGeneration.incrementAndGet()
     mutableState.value = mutableState.value.copy(
@@ -204,7 +222,7 @@ internal class ChatController(
     )
     try {
       val active = runtime.resumeSession(storedId)
-      if (sessionOperationGeneration.get() != generation) return
+      if (sessionOperationGeneration.get() != generation) return false
       mutableState.value = mutableState.value.copy(
         chat = active.toChatState(),
         modelCatalog = ModelCatalog(),
@@ -212,11 +230,18 @@ internal class ChatController(
         pendingModelConfirmation = null,
         error = null,
       )
+      selectionStore.save(active.storedId)
+      true
     } catch (error: Throwable) {
       if (error is CancellationException) throw error
+      if (error is GatewayRpcException && error.code == 4007 && sessionOperationGeneration.get() == generation) {
+        selectionStore.clear()
+        return newSession()
+      }
       if (sessionOperationGeneration.get() == generation) {
         mutableState.value = mutableState.value.copy(error = error.toUiError())
       }
+      false
     }
   }
 
