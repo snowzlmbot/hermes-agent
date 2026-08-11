@@ -10,7 +10,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class)
+@Config(sdk = [35], application = Application::class)
 class AndroidStoredSessionSelectionStoreTest {
   @Test
   fun storesSelectionsByGatewayProfileAndClearsOnlyTheTarget() {
