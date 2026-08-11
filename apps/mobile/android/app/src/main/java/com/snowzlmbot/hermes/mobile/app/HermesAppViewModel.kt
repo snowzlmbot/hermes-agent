@@ -367,7 +367,19 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
 
   private fun startConnectSaved() {
     val generation = nextConnectionGeneration()
-    connectJob = viewModelScope.launch { connectSaved(generation) }
+    connectJob = viewModelScope.launch {
+      try {
+        connectSaved(generation)
+      } catch (error: Throwable) {
+        if (error is CancellationException) throw error
+        if (isCurrentConnection(generation)) {
+          mutableState.value = AppUiState(
+            screen = AppScreen.ONBOARDING,
+            configurationError = error.message ?: "Could not connect to the gateway",
+          )
+        }
+      }
+    }
   }
 
   private suspend fun connectSaved(generation: Long) {
@@ -378,33 +390,30 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       return
     }
     val next = ChatController(graph.runtime(connection), viewModelScope)
-    if (!isCurrentConnection(generation)) {
-      next.close()
-      return
-    }
-    next.connect()
-    if (!isCurrentConnection(generation)) {
-      next.close()
-      return
-    }
-    if (next.state.value.chat.runtimeSessionId == null) next.newSession()
-    if (!isCurrentConnection(generation)) {
-      next.close()
-      return
-    }
+    var installed = false
+    try {
+      if (!isCurrentConnection(generation)) return
+      next.connect()
+      if (!isCurrentConnection(generation)) return
+      if (next.state.value.chat.runtimeSessionId == null) next.newSession()
+      if (!isCurrentConnection(generation)) return
 
-    val previous = controller
-    controller = next
-    previous?.close()
-    chatCollection?.cancel()
-    chatCollection = viewModelScope.launch {
-      next.state.collect { chat ->
-        if (isCurrentConnection(generation) && controller === next) {
-          mutableState.value = AppUiState(screen = AppScreen.CHAT, chat = chat)
+      val previous = controller
+      installed = true
+      controller = next
+      previous?.close()
+      chatCollection?.cancel()
+      chatCollection = viewModelScope.launch {
+        next.state.collect { chat ->
+          if (isCurrentConnection(generation) && controller === next) {
+            mutableState.value = AppUiState(screen = AppScreen.CHAT, chat = chat)
+          }
         }
       }
+      mutableState.value = AppUiState(screen = AppScreen.CHAT, chat = next.state.value)
+    } finally {
+      if (!installed) next.close()
     }
-    mutableState.value = AppUiState(screen = AppScreen.CHAT, chat = next.state.value)
   }
 
   private fun nextConnectionGeneration(): Long {
