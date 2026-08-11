@@ -115,7 +115,7 @@ public enum GatewayAuthMode: String, Codable, Equatable, Sendable {
 }
 
 public enum NativeOAuthState: Equatable, Sendable {
-    case loopbackOnly
+    case available
     case unavailable
 }
 
@@ -126,9 +126,9 @@ public struct NativeOAuthCapability: Equatable, Sendable {
 
     public init(status: [String: Any]) {
         if GatewayAuthMode.nativePKCESupported(status: status) {
-            self.state = .loopbackOnly
-            self.supportsASWebAuthenticationSessionCallback = false
-            self.explanation = String(localized: "oauth.loopback.explanation")
+            self.state = .available
+            self.supportsASWebAuthenticationSessionCallback = true
+            self.explanation = String(localized: "oauth.available.explanation")
         } else {
             self.state = .unavailable
             self.supportsASWebAuthenticationSessionCallback = false

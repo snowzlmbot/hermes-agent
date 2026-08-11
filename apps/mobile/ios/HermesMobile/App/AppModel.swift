@@ -16,6 +16,7 @@ public final class AppModel {
     public private(set) var chatModel: ChatModel?
     public private(set) var gatewayRESTClient: GatewayRESTClient?
     public private(set) var oauthCapability: NativeOAuthCapability?
+    public private(set) var oauthProviders: [NativeOAuthProvider] = []
     public private(set) var isConnecting = false
     public private(set) var isSceneActive = true
     public var selectedSessionID: String?
@@ -23,6 +24,7 @@ public final class AppModel {
 
     @ObservationIgnored private let dependencies: AppDependencies
     @ObservationIgnored private let backgroundActivity = BackgroundActivityService()
+    @ObservationIgnored private let nativeAuthenticationSession = NativeAuthenticationSession()
 
     public init(dependencies: AppDependencies = .live) {
         self.dependencies = dependencies
@@ -55,6 +57,7 @@ public final class AppModel {
         isConnecting = true
         errorMessage = nil
         oauthCapability = nil
+        oauthProviders = []
         defer { isConnecting = false }
 
         do {
@@ -64,6 +67,12 @@ public final class AppModel {
             guard !cleanToken.isEmpty else {
                 if status.authRequired {
                     oauthCapability = status.nativeOAuthCapability
+                    if status.nativeOAuthCapability.supportsASWebAuthenticationSessionCallback {
+                        oauthProviders = try await GatewayRESTClient.nativeOAuthProviders(
+                            endpoint: endpoint,
+                            session: dependencies.urlSession
+                        )
+                    }
                     return
                 }
                 errorMessage = String(localized: "error.token.required")
@@ -85,6 +94,61 @@ public final class AppModel {
         }
     }
 
+    public func signInWithOAuth(address: String, provider: String, allowInsecure: Bool) async {
+        guard !isConnecting else { return }
+        isConnecting = true
+        errorMessage = nil
+        defer { isConnecting = false }
+
+        do {
+            let endpoint = try GatewayEndpoint(rawValue: address, allowInsecureRemote: allowInsecure)
+            let status = try await GatewayRESTClient.status(endpoint: endpoint, session: dependencies.urlSession)
+            let capability = status.nativeOAuthCapability
+            oauthCapability = capability
+            guard capability.supportsASWebAuthenticationSessionCallback else {
+                errorMessage = String(localized: "error.oauth.unavailable")
+                return
+            }
+            let providers = try await GatewayRESTClient.nativeOAuthProviders(
+                endpoint: endpoint,
+                session: dependencies.urlSession
+            )
+            oauthProviders = providers
+
+            let cleanProvider = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+            let selected = providers.first { $0.name == cleanProvider }
+                ?? (cleanProvider.isEmpty && providers.count == 1 ? providers[0] : nil)
+            guard let selected else {
+                errorMessage = String(localized: "error.oauth.provider.required")
+                return
+            }
+            let request = try NativeAuthorizationRequest(endpoint: endpoint, provider: selected.name)
+            let callbackURL = try await nativeAuthenticationSession.authenticate(request)
+            let code = try request.authorizationCode(from: callbackURL)
+            let tokens = try await GatewayRESTClient.exchangeNativeCode(
+                endpoint: endpoint,
+                code: code,
+                verifier: request.verifier,
+                session: dependencies.urlSession
+            )
+            let profile = GatewayProfile(
+                name: String(localized: "profile.default.name"),
+                endpoint: endpoint.baseURL.absoluteString,
+                authMode: .oauth,
+                allowInsecure: allowInsecure
+            )
+            let credentials = GatewayCredentials.oauth(tokens, endpoint: profile.endpoint)
+            try await dependencies.profileRepository.save(profile: profile, credentials: credentials)
+            try await activate(profile: profile, credentials: credentials)
+        } catch NativeOAuthError.cancelled {
+            return
+        } catch let endpointError as GatewayEndpointError {
+            errorMessage = endpointMessage(endpointError)
+        } catch {
+            errorMessage = String(localized: "error.oauth.failed")
+        }
+    }
+
     public func disconnectAndForget() async {
         await chatModel?.disconnect()
         do {
@@ -97,6 +161,7 @@ public final class AppModel {
         gatewayRESTClient = nil
         selectedSessionID = nil
         oauthCapability = nil
+        oauthProviders = []
         phase = .onboarding
     }
 

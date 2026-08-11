@@ -1,7 +1,7 @@
 "app.name" = "Hermes";
 "loading.app" = "Loading Hermes";
 "onboarding.title" = "Connect to Hermes";
-"onboarding.subtitle" = "Use the address and access token from your Hermes gateway.";
+"onboarding.subtitle" = "Sign in securely with your gateway or use an access token.";
 "connection.section" = "Gateway";
 "connection.address" = "Gateway address";
 "connection.token" = "Gateway token";
@@ -14,11 +14,13 @@
 "connection.secure.storage" = "Credentials are stored in the iOS Keychain and are never included in notification text.";
 "profile.default.name" = "Primary";
 "oauth.section" = "Native sign-in";
-"oauth.loopback.title" = "Native sign-in is not available on iOS";
+"oauth.available.title" = "Native sign-in is available";
 "oauth.unavailable.title" = "Native sign-in is unavailable";
-"oauth.loopback.explanation" = "This gateway currently accepts native sign-in callbacks only on http://127.0.0.1 or [::1]. Those loopback callbacks cannot return to this iOS app, so Hermes will not pretend the sign-in succeeded.";
-"oauth.unavailable.explanation" = "This gateway does not advertise a native PKCE sign-in flow.";
-"oauth.token.guidance" = "Configure a static gateway token, or update the gateway when it supports an iOS callback URL.";
+"oauth.available.explanation" = "Continue in the system browser. Hermes uses PKCE, returns only a one-time code to this app, and stores the resulting credentials in Keychain.";
+"oauth.unavailable.explanation" = "This gateway does not advertise the registered mobile PKCE sign-in flow.";
+"oauth.provider" = "Identity provider";
+"oauth.provider.select" = "Choose a provider";
+"oauth.token.guidance" = "Use a static gateway token or update the gateway to a version that supports registered mobile callbacks.";
 "sessions.title" = "Sessions";
 "sessions.empty.title" = "No sessions";
 "sessions.empty.description" = "Start a new conversation with the add button.";
@@ -59,6 +61,7 @@
 "sudo.title" = "Administrator password required";
 "sudo.prompt" = "Enter the password to continue. It is sent directly to the pending request and is not stored in app state.";
 "action.connect" = "Connect";
+"action.oauth.signin" = "Sign in securely";
 "action.dismiss" = "Dismiss";
 "action.new.session" = "New session";
 "action.rename" = "Rename";
@@ -97,6 +100,9 @@
 "error.restore.connection" = "The saved connection could not be restored. Check the gateway and connect again.";
 "error.token.required" = "Enter a gateway token.";
 "error.connection.failed" = "Could not connect to the Hermes gateway.";
+"error.oauth.unavailable" = "This gateway does not support registered mobile sign-in.";
+"error.oauth.provider.required" = "Choose an identity provider to continue.";
+"error.oauth.failed" = "Native sign-in could not be completed.";
 "error.credentials.clear" = "The saved credential could not be removed.";
 "error.session.create" = "Could not create a session.";
 "error.session.resume" = "Could not resume that session.";

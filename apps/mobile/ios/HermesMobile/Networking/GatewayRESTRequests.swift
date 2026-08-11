@@ -6,6 +6,27 @@ public enum GatewayRESTRequestError: Error, Equatable, Sendable {
 }
 
 public enum GatewayRESTRequestBuilder {
+    public static func nativeTokenRequest(
+        endpoint: GatewayEndpoint,
+        code: String,
+        verifier: String
+    ) throws -> URLRequest {
+        guard !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !verifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw GatewayRESTRequestError.emptyBody
+        }
+        var request = URLRequest(url: endpoint.apiURL("auth/native/token"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "code": code,
+            "code_verifier": verifier
+        ])
+        return request
+    }
+
     public static func patchSessionRequest(
         endpoint: GatewayEndpoint,
         auth: StoredGatewayAuth,

@@ -69,6 +69,40 @@ public actor GatewayRESTClient {
         return GatewayStatus(json: object)
     }
 
+    public static func nativeOAuthProviders(
+        endpoint: GatewayEndpoint,
+        session: URLSession = .shared
+    ) async throws -> [NativeOAuthProvider] {
+        var request = URLRequest(url: endpoint.apiURL("api/auth/providers"))
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200 ..< 300).contains(http.statusCode),
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw GatewayRESTError.invalidResponse
+        }
+        return NativeOAuthProvider.parseList(object)
+    }
+
+    public static func exchangeNativeCode(
+        endpoint: GatewayEndpoint,
+        code: String,
+        verifier: String,
+        session: URLSession = .shared
+    ) async throws -> NativeTokenSet {
+        let request = try GatewayRESTRequestBuilder.nativeTokenRequest(
+            endpoint: endpoint,
+            code: code,
+            verifier: verifier
+        )
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            throw GatewayRESTError.http(http.statusCode, Self.detail(from: data))
+        }
+        return try nativeTokenSet(from: data)
+    }
+
     public func freshWebSocketTicket() async throws -> String {
         let data = try await sendJSON(path: "api/auth/ws-ticket", body: [:])
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -189,5 +223,22 @@ public actor GatewayRESTClient {
     private static func detail(from data: Data) -> String {
         guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "Request failed" }
         return body["detail"] as? String ?? body["message"] as? String ?? "Request failed"
+    }
+
+    private static func nativeTokenSet(from data: Data) throws -> NativeTokenSet {
+        guard let body = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let accessToken = body["access_token"] as? String,
+              !accessToken.isEmpty,
+              let refreshToken = body["refresh_token"] as? String,
+              !refreshToken.isEmpty else {
+            throw GatewayRESTError.invalidResponse
+        }
+        return NativeTokenSet(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAt: (body["expires_at"] as? NSNumber)?.doubleValue ?? 0,
+            provider: body["provider"] as? String ?? "",
+            userID: body["user_id"] as? String ?? ""
+        )
     }
 }

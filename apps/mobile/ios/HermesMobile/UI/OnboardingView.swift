@@ -5,6 +5,7 @@ struct OnboardingView: View {
     @State private var address = "https://"
     @State private var token = ""
     @State private var allowInsecure = false
+    @State private var selectedProvider = ""
 
     var body: some View {
         NavigationStack {
@@ -55,7 +56,21 @@ struct OnboardingView: View {
                 }
 
                 if let capability = appModel.oauthCapability {
-                    OAuthCapabilityPanel(capability: capability)
+                    OAuthCapabilityPanel(
+                        capability: capability,
+                        providers: appModel.oauthProviders,
+                        selectedProvider: $selectedProvider,
+                        isConnecting: appModel.isConnecting,
+                        onSignIn: {
+                            Task {
+                                await appModel.signInWithOAuth(
+                                    address: address,
+                                    provider: selectedProvider,
+                                    allowInsecure: allowInsecure
+                                )
+                            }
+                        }
+                    )
                 }
             }
             .navigationTitle(String(localized: "app.name"))
@@ -66,22 +81,43 @@ struct OnboardingView: View {
 
 private struct OAuthCapabilityPanel: View {
     let capability: NativeOAuthCapability
+    let providers: [NativeOAuthProvider]
+    @Binding var selectedProvider: String
+    let isConnecting: Bool
+    let onSignIn: () -> Void
 
     var body: some View {
         Section(String(localized: "oauth.section")) {
             Label(
-                capability.state == .loopbackOnly
-                    ? String(localized: "oauth.loopback.title")
+                capability.state == .available
+                    ? String(localized: "oauth.available.title")
                     : String(localized: "oauth.unavailable.title"),
-                systemImage: "exclamationmark.shield"
+                systemImage: capability.state == .available ? "person.badge.key.fill" : "exclamationmark.shield"
             )
-            .foregroundStyle(.orange)
+            .foregroundStyle(capability.state == .available ? .green : .orange)
             Text(capability.explanation)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            Text(String(localized: "oauth.token.guidance"))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            if capability.state == .available {
+                if providers.count > 1 {
+                    Picker(String(localized: "oauth.provider"), selection: $selectedProvider) {
+                        Text(String(localized: "oauth.provider.select")).tag("")
+                        ForEach(providers, id: \.name) { provider in
+                            Text(provider.displayName).tag(provider.name)
+                        }
+                    }
+                }
+                Button(action: onSignIn) {
+                    Label(String(localized: "action.oauth.signin"), systemImage: "person.badge.key")
+                        .frame(maxWidth: .infinity)
+                }
+                .disabled(isConnecting || providers.isEmpty || (providers.count > 1 && selectedProvider.isEmpty))
+                .accessibilityIdentifier("Sign in with OAuth")
+            } else {
+                Text(String(localized: "oauth.token.guidance"))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

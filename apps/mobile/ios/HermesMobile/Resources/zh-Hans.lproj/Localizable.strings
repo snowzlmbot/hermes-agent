@@ -1,7 +1,7 @@
 "app.name" = "Hermes";
 "loading.app" = "正在载入 Hermes";
 "onboarding.title" = "连接到 Hermes";
-"onboarding.subtitle" = "使用 Hermes 网关提供的地址和访问令牌。";
+"onboarding.subtitle" = "通过网关安全登录，或使用访问令牌连接。";
 "connection.section" = "网关";
 "connection.address" = "网关地址";
 "connection.token" = "网关令牌";
@@ -14,11 +14,13 @@
 "connection.secure.storage" = "凭据存储在 iOS 钥匙串中，不会出现在通知文本中。";
 "profile.default.name" = "主要连接";
 "oauth.section" = "原生登录";
-"oauth.loopback.title" = "iOS 暂不支持原生登录";
+"oauth.available.title" = "可使用原生登录";
 "oauth.unavailable.title" = "原生登录不可用";
-"oauth.loopback.explanation" = "此网关目前仅接受 http://127.0.0.1 或 [::1] 上的原生登录回调。这些回环地址无法返回此 iOS 应用，因此 Hermes 不会伪装登录成功。";
-"oauth.unavailable.explanation" = "此网关未提供原生 PKCE 登录流程。";
-"oauth.token.guidance" = "请配置静态网关令牌，或等待网关支持 iOS 回调地址。";
+"oauth.available.explanation" = "将在系统浏览器中继续。Hermes 使用 PKCE，仅向本应用返回一次性代码，并把登录凭据保存在钥匙串中。";
+"oauth.unavailable.explanation" = "此网关未提供已注册的移动端 PKCE 登录流程。";
+"oauth.provider" = "身份提供商";
+"oauth.provider.select" = "选择提供商";
+"oauth.token.guidance" = "请使用静态网关令牌，或将网关更新到支持已注册移动端回调的版本。";
 "sessions.title" = "会话";
 "sessions.empty.title" = "暂无会话";
 "sessions.empty.description" = "点击添加按钮开始新对话。";
@@ -59,6 +61,7 @@
 "sudo.title" = "需要管理员密码";
 "sudo.prompt" = "请输入密码以继续。密码会直接发送给等待中的请求，不会保存在应用状态中。";
 "action.connect" = "连接";
+"action.oauth.signin" = "安全登录";
 "action.dismiss" = "关闭";
 "action.new.session" = "新建会话";
 "action.rename" = "重命名";
@@ -97,6 +100,9 @@
 "error.restore.connection" = "无法恢复保存的连接。请检查网关后重新连接。";
 "error.token.required" = "请输入网关令牌。";
 "error.connection.failed" = "无法连接到 Hermes 网关。";
+"error.oauth.unavailable" = "此网关不支持已注册的移动端登录。";
+"error.oauth.provider.required" = "请选择身份提供商后继续。";
+"error.oauth.failed" = "无法完成原生登录。";
 "error.credentials.clear" = "无法移除保存的凭据。";
 "error.session.create" = "无法创建会话。";
 "error.session.resume" = "无法恢复该会话。";
