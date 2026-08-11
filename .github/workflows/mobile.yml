@@ -1,4 +1,4 @@
-name: Mobile
+name: Mobile iOS
 
 on:
   workflow_dispatch:
@@ -6,63 +6,21 @@ on:
     branches:
       - hermes-agent-Mobile-app
     paths:
-      - apps/mobile/**
+      - apps/mobile/ios/**
       - .github/workflows/mobile.yml
   pull_request:
     paths:
-      - apps/mobile/**
+      - apps/mobile/ios/**
       - .github/workflows/mobile.yml
 
 permissions:
   contents: read
 
 concurrency:
-  group: mobile-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: mobile-ios-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  contract:
-    name: Protocol contract
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          persist-credentials: false
-      - name: Verify protocol fixture
-        run: bash apps/mobile/scripts/verify.sh --contract-only
-
-  android:
-    name: Android tests and debug APK
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          persist-credentials: false
-      - name: Set up Java
-        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@4d9f0ba0025fe599b4ebab900eb7f3a1d93ef4c2
-      - name: Verify Android app
-        working-directory: apps/mobile/android
-        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
-      - name: Upload debug APK and reports
-        if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
-        with:
-          name: hermes-mobile-android-${{ github.sha }}
-          path: |
-            apps/mobile/android/app/build/outputs/apk/debug/*.apk
-            apps/mobile/android/app/build/reports/**
-          if-no-files-found: error
-          retention-days: 14
-
   ios:
     name: iOS simulator tests
     runs-on: macos-26
