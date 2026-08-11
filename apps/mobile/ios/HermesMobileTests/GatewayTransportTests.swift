@@ -85,6 +85,32 @@ final class GatewayTransportTests: XCTestCase {
         let count = await ticketSource.count
         XCTAssertEqual(count, 2)
     }
+
+    func testStaleReceiveFailureDoesNotClearReplacementSocket() async throws {
+        let first = DelayedCancelSocket()
+        let second = TestSocket()
+        let sockets = SocketQueue([first, second])
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .token("test-token"),
+            socketFactory: { _ in sockets.next() }
+        )
+
+        try await transport.connect()
+        await first.waitUntilReceiving()
+        await transport.disconnect()
+        try await transport.connect()
+        await first.releaseFailure()
+        await Task.yield()
+
+        let request = Task { try await transport.request(GatewayMethod.sessionList, params: [:]) }
+        let frames = await second.waitForRequests(count: 1)
+        await second.push(.response(id: frames[0].id, result: .object(["ok": .bool(true)])))
+
+        let response = try await request.value
+        XCTAssertEqual(response, .object(["ok": .bool(true)]))
+    }
 }
 
 private actor HookRecorder {
@@ -106,6 +132,42 @@ private actor TicketRecorder {
     func next() -> String {
         count += 1
         return "ticket-\(count)"
+    }
+}
+
+private final class SocketQueue: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sockets: [any GatewaySocket]
+
+    init(_ sockets: [any GatewaySocket]) {
+        self.sockets = sockets
+    }
+
+    func next() -> any GatewaySocket {
+        lock.lock()
+        defer { lock.unlock() }
+        return sockets.removeFirst()
+    }
+}
+
+private actor DelayedCancelSocket: GatewaySocket {
+    private var continuation: CheckedContinuation<Data, Error>?
+
+    func send(_ data: Data) async throws {}
+
+    func receive() async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation = $0 }
+    }
+
+    func waitUntilReceiving() async {
+        while continuation == nil { await Task.yield() }
+    }
+
+    func cancel() async {}
+
+    func releaseFailure() {
+        continuation?.resume(throwing: GatewayTransportError.connectionLost)
+        continuation = nil
     }
 }
 

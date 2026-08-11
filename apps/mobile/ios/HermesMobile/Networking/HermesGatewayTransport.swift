@@ -75,6 +75,7 @@ public actor HermesGatewayTransport {
     private var receiver: Task<Void, Never>?
     private var connectionAttempt: ConnectionAttempt?
     private var connectionAttemptSequence = 0
+    private var connectionGeneration = 0
     private var requestSequence = 0
     private var pending: [JSONRPCID: CheckedContinuation<JSONValue, Error>] = [:]
     private var events: [GatewayEvent] = []
@@ -119,9 +120,11 @@ public actor HermesGatewayTransport {
             }
             connectionAttempt = nil
             let nextSocket = socketFactory(endpoint.webSocketURL(auth: dialAuth))
+            connectionGeneration += 1
+            let generation = connectionGeneration
             socket = nextSocket
             receiver = Task { [weak self] in
-                await self?.receiveLoop(socket: nextSocket)
+                await self?.receiveLoop(socket: nextSocket, generation: generation)
             }
             await hooks.onConnected()
         } catch {
@@ -134,6 +137,7 @@ public actor HermesGatewayTransport {
 
     public func disconnect() async {
         intentionallyDisconnected = true
+        connectionGeneration += 1
         connectionAttempt?.task.cancel()
         connectionAttempt = nil
         receiver?.cancel()
@@ -208,16 +212,18 @@ public actor HermesGatewayTransport {
         }
     }
 
-    private func receiveLoop(socket: any GatewaySocket) async {
+    private func receiveLoop(socket: any GatewaySocket, generation: Int) async {
         do {
             while !Task.isCancelled {
                 let data = try await socket.receive()
+                guard generation == connectionGeneration else { return }
                 let frame = try decoder.decode(JSONRPCInboundFrame.self, from: data)
                 handle(frame)
             }
         } catch {
-            if !intentionallyDisconnected {
+            if generation == connectionGeneration, !intentionallyDisconnected {
                 self.socket = nil
+                receiver = nil
                 failPending(with: GatewayTransportError.connectionLost)
                 await hooks.onDisconnected(String(describing: error))
             }

@@ -36,4 +36,44 @@ final class ProfileRepositoryTests: XCTestCase {
         XCTAssertTrue(storedProfiles.isEmpty)
         XCTAssertNil(storedCredentials)
     }
+
+    @MainActor
+    func testFailedCredentialClearDoesNotReportSuccessfulForget() async throws {
+        let profiles = InMemoryGatewayProfileStore()
+        let credentials = FailingDeleteCredentialStore()
+        let repository = GatewayProfileRepository(profileStore: profiles, credentialStore: credentials)
+        let profile = GatewayProfile(endpoint: "https://gateway.example.com", authMode: .token)
+        try await repository.save(profile: profile, credentials: GatewayCredentials(token: "secret"))
+        let model = AppModel(
+            dependencies: AppDependencies(
+                profileRepository: repository,
+                notificationService: NoopNotificationService(),
+                attachmentImporter: AttachmentImportService()
+            )
+        )
+        await model.bootstrap(arguments: ["--ui-demo"])
+
+        await model.disconnectAndForget()
+        let persistedConnection = try await repository.load()
+
+        XCTAssertEqual(model.phase, .connected)
+        XCTAssertNotNil(model.chatModel)
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertNotNil(persistedConnection)
+    }
+}
+
+private actor FailingDeleteCredentialStore: CredentialStore {
+    private var value: GatewayCredentials?
+
+    func save(_ credentials: GatewayCredentials) async throws { value = credentials }
+    func load() async throws -> GatewayCredentials? { value }
+    func delete() async throws { throw CredentialError.keychainFailure(OSStatusCode(-1)) }
+}
+
+private actor NoopNotificationService: NotificationScheduling {
+    func requestAuthorization() async -> Bool { true }
+    func scheduleCompletion(sessionTitle: String, sessionID: String?) async {}
+    func scheduleApproval(sessionID: String) async {}
+    func scheduleInput(sessionID: String) async {}
 }

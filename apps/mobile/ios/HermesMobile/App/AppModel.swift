@@ -156,6 +156,7 @@ public final class AppModel {
             try await dependencies.profileRepository.clear()
         } catch {
             errorMessage = String(localized: "error.credentials.clear")
+            return
         }
         profile = nil
         chatModel = nil
