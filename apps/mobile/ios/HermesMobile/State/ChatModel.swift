@@ -28,6 +28,8 @@ public final class ChatModel {
     @ObservationIgnored private let transport: HermesGatewayTransport
     @ObservationIgnored private let archiveStore: (any SessionArchiveStore)?
     @ObservationIgnored private let sessionMutationClient: (any SessionMutationClient)?
+    @ObservationIgnored private let eventReplayGuard: EventReplayGuard
+    @ObservationIgnored private let profileScope: String
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var connectionOperationGeneration: UInt = 0
     @ObservationIgnored private var sessionOperationGeneration: UInt = 0
@@ -39,11 +41,16 @@ public final class ChatModel {
         archiveStore: (any SessionArchiveStore)? = nil,
         sessionMutationClient: (any SessionMutationClient)? = nil,
         state: ChatState = .empty,
-        sessions: [SessionSummary] = []
+        sessions: [SessionSummary] = [],
+        eventReplayGuard: EventReplayGuard? = nil,
+        profileScope: String = "default"
     ) {
         self.transport = transport
         self.archiveStore = archiveStore
         self.sessionMutationClient = sessionMutationClient
+        self.profileScope = profileScope
+        self.eventReplayGuard = eventReplayGuard ?? EventReplayGuard()
+        self.eventReplayGuard.activate(profileScope: profileScope)
         self.state = state
         self.sessions = sessions
         self.isConnected = false
@@ -669,6 +676,15 @@ public final class ChatModel {
     }
 
     private func consume(_ event: GatewayEvent) {
+        if eventAffectsCurrentRuntime(event),
+           let eventSessionID = event.sessionID,
+           eventSessionID != state.runtimeSessionID { return }
+        if let runtimeID = state.runtimeSessionID,
+           let storedID = NotificationRouteMetadata.normalizedStoredSessionID(state.storedSessionID),
+           event.sessionID == runtimeID,
+           !eventReplayGuard.shouldConsume(event: event, storedSessionID: storedID, profileScope: profileScope) {
+            return
+        }
         let payload = event.payload?.object ?? [:]
         switch event.type {
         case .gatewayReady:
@@ -849,6 +865,18 @@ public final class ChatModel {
             )
         case .unknown:
             break
+        }
+    }
+
+    private func eventAffectsCurrentRuntime(_ event: GatewayEvent) -> Bool {
+        switch event.type {
+        case .sessionInfo, .messageStart, .messageDelta, .messageInterim, .messageComplete,
+             .reasoningDelta, .thinkingDelta, .toolStart, .toolProgress, .toolComplete,
+             .approvalRequest, .clarifyRequest, .clarifyExpire, .secretRequest,
+             .secretExpire, .sudoRequest, .sudoExpire, .statusUpdate, .error:
+            return true
+        default:
+            return false
         }
     }
 

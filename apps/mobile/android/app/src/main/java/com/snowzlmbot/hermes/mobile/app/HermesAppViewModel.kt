@@ -18,6 +18,7 @@ import com.snowzlmbot.hermes.mobile.core.PendingNativeOAuth
 import com.snowzlmbot.hermes.mobile.core.SecretValue
 import com.snowzlmbot.hermes.mobile.core.StoredGatewayAuth
 import com.snowzlmbot.hermes.mobile.feature.ChatController
+import com.snowzlmbot.hermes.mobile.feature.EventReplayGuard
 import com.snowzlmbot.hermes.mobile.feature.AndroidStoredSessionSelectionStore
 import com.snowzlmbot.hermes.mobile.feature.MobileChatUiState
 import com.snowzlmbot.hermes.mobile.platform.AttachmentPayload
@@ -56,6 +57,8 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
   private val graph = (application as HermesApplication).graph
   private val notificationService = LocalNotificationService(application)
   private val notificationRoutes = StoredSessionRouteQueue()
+  private val eventReplayGuard = EventReplayGuard()
+  private var replayGuardScope: String? = null
   private var activeNotificationProfileScope: String? = null
   private val mutableState = MutableStateFlow(AppUiState())
   private var controller: ChatController? = null
@@ -280,6 +283,8 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
 
   fun forgetConnection() {
     notificationRoutes.clear()
+    eventReplayGuard.clear()
+    replayGuardScope = null
     activeNotificationProfileScope = null
     resetOAuthFlow()
     foregroundRecoveryArmed = false
@@ -463,11 +468,19 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       mutableState.value = AppUiState(screen = AppScreen.ONBOARDING)
       return
     }
-    val notificationProfileScope = NotificationProfileScope.fromSelectionScope(connection.profile.sessionSelectionScope)
+    val selectionScope = connection.profile.sessionSelectionScope
+    if (replayGuardScope != selectionScope) {
+      eventReplayGuard.clear()
+      eventReplayGuard.activate(selectionScope)
+      replayGuardScope = selectionScope
+    }
+    val notificationProfileScope = NotificationProfileScope.fromSelectionScope(selectionScope)
     val next = ChatController(
       runtime = graph.runtime(connection),
       scope = viewModelScope,
-      selectionStore = AndroidStoredSessionSelectionStore(getApplication<Application>(), connection.profile.sessionSelectionScope),
+      selectionStore = AndroidStoredSessionSelectionStore(getApplication<Application>(), selectionScope),
+      eventReplayGuard = eventReplayGuard,
+      profileScope = selectionScope,
       onNotification = { signal ->
         if (isCurrentConnection(generation) && activeNotificationProfileScope == notificationProfileScope) {
           notificationService.post(

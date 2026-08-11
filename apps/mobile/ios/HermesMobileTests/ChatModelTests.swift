@@ -463,16 +463,157 @@ final class ChatModelTests: XCTestCase {
         ))
 
         for _ in 0..<100 {
-            if signals.count == 4 { break }
+            if signals.count == 3 { break }
             await Task.yield()
         }
 
         XCTAssertEqual(signals, [
             .messageCompleted(storedSessionID: "stored-canonical"),
             .approvalRequired(storedSessionID: "stored-canonical"),
-            .inputRequired(storedSessionID: "stored-canonical"),
-            .messageCompleted(storedSessionID: nil)
+            .inputRequired(storedSessionID: "stored-canonical")
         ])
+    }
+
+    func testReplayDeduplicationPrecedesReducerAndSignalHandling() async throws {
+        let socket = ControlledChatSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .token("token"),
+            socketFactory: { _ in socket }
+        )
+        let replayGuard = EventReplayGuard(capacity: 32)
+        replayGuard.activate(profileScope: "profile-a")
+        let model = ChatModel(
+            transport: transport,
+            eventReplayGuard: replayGuard,
+            profileScope: "profile-a"
+        )
+        var signals: [ChatSignal] = []
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        model.signalHandler = { signals.append($0) }
+
+        let completion = GatewayEvent(
+            type: .messageComplete,
+            sessionID: "runtime-1",
+            payload: .object([
+                "event_id": .string("completion-event"),
+                "message_id": .string("message-1"),
+                "status": .string("complete"),
+                "text": .string("answer")
+            ])
+        )
+        let approval = GatewayEvent(
+            type: .approvalRequest,
+            sessionID: "runtime-1",
+            payload: .object([
+                "event_id": .string("approval-event"),
+                "request_id": .string("approval-1"),
+                "command": .string("private command")
+            ])
+        )
+        await socket.pushEvent(completion)
+        await socket.pushEvent(completion)
+        await socket.pushEvent(approval)
+        await socket.pushEvent(approval)
+
+        for _ in 0..<100 {
+            if signals.count == 2 { break }
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.state.messages.map(\.text), ["answer"])
+        XCTAssertEqual(model.state.approval?.command, "private command")
+        XCTAssertEqual(signals, [
+            .messageCompleted(storedSessionID: "stored-1"),
+            .approvalRequired(storedSessionID: "stored-1")
+        ])
+    }
+
+    func testStreamingFramesOnlyDeduplicateWithIndependentEventIdentity() async throws {
+        let socket = ControlledChatSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .token("token"),
+            socketFactory: { _ in socket }
+        )
+        let model = ChatModel(transport: transport)
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
+        await socket.pushEvent(GatewayEvent(
+            type: .messageStart,
+            sessionID: "runtime-1",
+            payload: .object(["message_id": .string("message-1")])
+        ))
+        await socket.pushEvent(GatewayEvent(
+            type: .messageDelta,
+            sessionID: "runtime-1",
+            payload: .object(["message_id": .string("message-1"), "text": .string("a")])
+        ))
+        await socket.pushEvent(GatewayEvent(
+            type: .messageDelta,
+            sessionID: "runtime-1",
+            payload: .object(["message_id": .string("message-1"), "text": .string("b")])
+        ))
+        let replayedDelta = GatewayEvent(
+            type: .messageDelta,
+            sessionID: "runtime-1",
+            payload: .object([
+                "event_id": .string("delta-event"),
+                "message_id": .string("message-1"),
+                "text": .string("c")
+            ])
+        )
+        await socket.pushEvent(replayedDelta)
+        await socket.pushEvent(replayedDelta)
+
+        for _ in 0..<100 {
+            if model.state.messages.last?.text == "abc" { break }
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.state.messages.last?.text, "abc")
+    }
+
+    func testStaleRuntimeDoesNotPolluteReplayGuard() async throws {
+        let socket = ControlledChatSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .token("token"),
+            socketFactory: { _ in socket }
+        )
+        let model = ChatModel(transport: transport)
+        var signals: [ChatSignal] = []
+
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-current", storedID: "stored-1")
+        model.signalHandler = { signals.append($0) }
+        let event = GatewayEvent(
+            type: .messageComplete,
+            sessionID: "runtime-stale",
+            payload: .object([
+                "event_id": .string("completion-event"),
+                "message_id": .string("message-1"),
+                "status": .string("complete"),
+                "text": .string("answer")
+            ])
+        )
+        await socket.pushEvent(event)
+        model.setRuntimeSession(runtimeID: "runtime-stale", storedID: "stored-1")
+        await socket.pushEvent(event)
+
+        for _ in 0..<100 {
+            if signals.count == 1 { break }
+            await Task.yield()
+        }
+
+        XCTAssertEqual(model.state.messages.map(\.text), ["answer"])
+        XCTAssertEqual(signals, [.messageCompleted(storedSessionID: "stored-1")])
     }
 
     func testDemoSeedProvidesModelControlsCatalog() throws {

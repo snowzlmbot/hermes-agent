@@ -119,6 +119,8 @@ internal class ChatController(
   private val runtime: MobileGatewayRuntime,
   scope: CoroutineScope,
   private val selectionStore: StoredSessionSelectionStore = EmptyStoredSessionSelectionStore,
+  private val eventReplayGuard: EventReplayGuard = EventReplayGuard(),
+  private val profileScope: String = "default",
   private val onNotification: (ChatNotificationSignal) -> Unit = {},
 ) {
   private val mutableState = MutableStateFlow(MobileChatUiState())
@@ -127,6 +129,16 @@ internal class ChatController(
   private val eventJob: Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
     runtime.events.collect { event ->
       val current = mutableState.value
+      val runtimeId = current.chat.runtimeSessionId
+      val storedId = current.chat.storedSessionId
+      if (runtimeId != null && event.runtimeSessionId != null && event.runtimeSessionId != runtimeId) {
+        return@collect
+      }
+      if (runtimeId != null && storedId != null && event.runtimeSessionId == runtimeId &&
+        !eventReplayGuard.accept(profileScope, storedId, event)
+      ) {
+        return@collect
+      }
       val notification = notificationSignal(event, current.chat)
       val chat = ChatReducer.reduce(current.chat, event)
       val modelChanged = chat.model != current.chat.model || chat.provider != current.chat.provider

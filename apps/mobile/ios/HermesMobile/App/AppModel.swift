@@ -37,6 +37,8 @@ public final class AppModel {
     @ObservationIgnored private var isConsumingNotificationRoutes = false
     @ObservationIgnored private var notificationAuthorizationGranted = false
     @ObservationIgnored private var hasSceneRecoveryError = false
+    @ObservationIgnored private var eventReplayGuard: EventReplayGuard?
+    @ObservationIgnored private var eventReplayProfileScope: String?
 
     var pendingNotificationRouteCount: Int {
         pendingNotificationRoutes.count
@@ -178,6 +180,9 @@ public final class AppModel {
         }
         profile = nil
         chatModel = nil
+        eventReplayGuard?.clear()
+        eventReplayGuard = nil
+        eventReplayProfileScope = nil
         gatewayRESTClient = nil
         selectedSessionID = nil
         oauthCapability = nil
@@ -548,9 +553,21 @@ public final class AppModel {
             auth: transportAuth,
             socketFactory: dependencies.socketFactory
         )
+        let replayGuard: EventReplayGuard
+        if eventReplayProfileScope == profile.sessionSelectionScope, let existing = eventReplayGuard {
+            replayGuard = existing
+        } else {
+            eventReplayGuard?.clear()
+            replayGuard = EventReplayGuard()
+            replayGuard.activate(profileScope: profile.sessionSelectionScope)
+            eventReplayGuard = replayGuard
+            eventReplayProfileScope = profile.sessionSelectionScope
+        }
         let chatModel = ChatModel(
             transport: transport,
-            sessionMutationClient: restClient
+            sessionMutationClient: restClient,
+            eventReplayGuard: replayGuard,
+            profileScope: profile.sessionSelectionScope
         )
         configureSignals(for: chatModel, profile: profile)
 
