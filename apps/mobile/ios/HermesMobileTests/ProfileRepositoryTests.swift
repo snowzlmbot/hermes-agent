@@ -45,6 +45,33 @@ final class ProfileRepositoryTests: XCTestCase {
         XCTAssertNil(storedSessionID)
     }
 
+    func testSessionSelectionRepositorySeparatesEndpointsWithTheSameProfileID() async {
+        let selections = InMemoryStoredSessionSelectionStore()
+        let repository = GatewayProfileRepository(
+            profileStore: InMemoryGatewayProfileStore(),
+            credentialStore: InMemoryCredentialStore(),
+            sessionSelectionStore: selections
+        )
+        let first = GatewayProfile(
+            id: "default",
+            endpoint: "https://first.example.com",
+            authMode: .token
+        )
+        let second = GatewayProfile(
+            id: "default",
+            endpoint: "https://second.example.com",
+            authMode: .token
+        )
+
+        await repository.saveStoredSessionID("stored-first", for: first)
+        await repository.saveStoredSessionID("stored-second", for: second)
+
+        let firstSelection = await repository.loadStoredSessionID(for: first)
+        let secondSelection = await repository.loadStoredSessionID(for: second)
+        XCTAssertEqual(firstSelection, "stored-first")
+        XCTAssertEqual(secondSelection, "stored-second")
+    }
+
     func testSessionSelectionStorePersistsOnlyStoredIdentifierByProfile() async {
         let suiteName = "ProfileRepositoryTests.\(UUID().uuidString)"
         let storageKey = "session-selection"
