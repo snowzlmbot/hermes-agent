@@ -39,16 +39,16 @@ final class GatewayEndpointTests: XCTestCase {
         XCTAssertFalse(GatewayAuthMode.nativePKCESupported(status: ["auth_flows": ["cookie", "native_pkce"]]))
     }
 
-    func testNativeOAuthReportsLoopbackRequirementWithoutClaimingHostedCallbackSupport() {
+    func testNativeOAuthReportsRegisteredApplicationCallbackSupport() {
         let capability = NativeOAuthCapability(status: ["auth_required": true, "auth_flows": ["native_pkce_mobile"]])
 
-        XCTAssertEqual(capability.state, .loopbackOnly)
-        XCTAssertFalse(capability.supportsASWebAuthenticationSessionCallback)
-        XCTAssertTrue(capability.explanation.contains("127.0.0.1"))
+        XCTAssertEqual(capability.state, .available)
+        XCTAssertTrue(capability.supportsASWebAuthenticationSessionCallback)
+        XCTAssertFalse(capability.explanation.isEmpty)
     }
 
-    func testNativeOAuthCapabilityNeverPretendsAnIOSCallbackIsSupported() {
-        let capability = NativeOAuthCapability(status: ["auth_required": true, "auth_flows": ["cookie"]])
+    func testNativeOAuthCapabilityRejectsLegacyLoopbackOnlyGateways() {
+        let capability = NativeOAuthCapability(status: ["auth_required": true, "auth_flows": ["native_pkce"]])
 
         XCTAssertEqual(capability.state, .unavailable)
         XCTAssertFalse(capability.supportsASWebAuthenticationSessionCallback)
