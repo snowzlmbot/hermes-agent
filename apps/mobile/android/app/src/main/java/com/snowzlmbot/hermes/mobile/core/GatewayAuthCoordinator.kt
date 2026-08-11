@@ -66,6 +66,14 @@ class GatewayAuthCoordinator(
   }
 
   suspend fun logout() {
+    invalidate(clearRepository = true)
+  }
+
+  suspend fun invalidate() {
+    invalidate(clearRepository = false)
+  }
+
+  private suspend fun invalidate(clearRepository: Boolean) {
     stateMutex.lock()
     try {
       if (activeConnection == null) return
@@ -73,7 +81,7 @@ class GatewayAuthCoordinator(
       activeConnection = null
       refreshInFlight?.completeExceptionally(GatewaySignedOutException())
       refreshInFlight = null
-      repository.clear()
+      if (clearRepository) repository.clear()
     } finally {
       stateMutex.unlock()
     }

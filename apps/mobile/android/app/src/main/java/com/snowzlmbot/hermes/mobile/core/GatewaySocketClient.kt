@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -47,6 +49,7 @@ class GatewaySocketClient(
   private val mutableEvents = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 128)
   private val mutableState = MutableStateFlow(SocketState.DISCONNECTED)
   private val socketLock = Any()
+  private val connectMutex = Mutex()
 
   @Volatile
   private var socket: WebSocket? = null
@@ -55,27 +58,29 @@ class GatewaySocketClient(
   val state: StateFlow<SocketState> = mutableState
 
   override suspend fun connect() {
-    synchronized(socketLock) {
-      if (socket != null && mutableState.value == SocketState.CONNECTED) return
-      mutableState.value = SocketState.CONNECTING
-    }
-    val credential = credentialProvider()
-    val url = endpoint.webSocketUrl(credential).toString()
-    val opened = CompletableDeferred<Unit>()
-    val candidate = httpClient.newWebSocket(
-      Request.Builder().url(url).build(),
-      listener(opened),
-    )
-    synchronized(socketLock) { socket = candidate }
-    try {
-      withTimeout(15_000) { opened.await() }
-    } catch (error: Throwable) {
-      candidate.cancel()
+    connectMutex.withLock {
       synchronized(socketLock) {
-        if (socket === candidate) socket = null
+        if (socket != null && mutableState.value == SocketState.CONNECTED) return@withLock
+        mutableState.value = SocketState.CONNECTING
       }
-      mutableState.value = SocketState.FAILED
-      throw error
+      val credential = credentialProvider()
+      val url = endpoint.webSocketUrl(credential).toString()
+      val opened = CompletableDeferred<Unit>()
+      val candidate = httpClient.newWebSocket(
+        Request.Builder().url(url).build(),
+        listener(opened),
+      )
+      synchronized(socketLock) { socket = candidate }
+      try {
+        withTimeout(15_000) { opened.await() }
+      } catch (error: Throwable) {
+        candidate.cancel()
+        synchronized(socketLock) {
+          if (socket === candidate) socket = null
+        }
+        mutableState.value = SocketState.FAILED
+        throw error
+      }
     }
   }
 

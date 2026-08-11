@@ -2,6 +2,7 @@ package com.snowzlmbot.hermes.mobile.core
 
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.buildJsonObject
@@ -113,6 +114,41 @@ class GatewaySocketClientTest {
     assertEquals(2, calls)
     assertTrue(server.takeRequest().path.orEmpty().endsWith("ticket=fresh-1"))
     assertTrue(server.takeRequest().path.orEmpty().endsWith("ticket=fresh-2"))
+    socket.close()
+  }
+
+  @Test
+  fun concurrentConnectsShareOneDialAndSingleUseTicket() = runBlocking {
+    server.enqueue(
+      MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+        override fun onOpen(webSocket: okhttp3.WebSocket, response: okhttp3.Response) {
+          webSocket.send(
+            """{"jsonrpc":"2.0","method":"event","params":{"type":"gateway.ready","payload":{}}}""",
+          )
+        }
+
+        override fun onClosing(webSocket: okhttp3.WebSocket, code: Int, reason: String) {
+          webSocket.close(code, reason)
+        }
+      }),
+    )
+    var credentialCalls = 0
+    val socket = GatewaySocketClient(
+      endpoint = GatewayEndpoint.parse(server.url("/").toString()),
+      credentialProvider = {
+        credentialCalls += 1
+        delay(50)
+        GatewayCredential.Ticket(SecretValue("shared-ticket"))
+      },
+    )
+
+    val first = async { socket.connect() }
+    val second = async { socket.connect() }
+    first.await()
+    second.await()
+
+    assertEquals(1, credentialCalls)
+    assertEquals("/api/ws?ticket=shared-ticket", server.takeRequest().path)
     socket.close()
   }
 }

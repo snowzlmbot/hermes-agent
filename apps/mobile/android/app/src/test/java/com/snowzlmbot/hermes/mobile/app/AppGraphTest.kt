@@ -1,12 +1,17 @@
 package com.snowzlmbot.hermes.mobile.app
 
 import com.snowzlmbot.hermes.mobile.core.CredentialStore
+import com.snowzlmbot.hermes.mobile.core.GatewayAuthCoordinator
 import com.snowzlmbot.hermes.mobile.core.GatewayAuthMode
+import com.snowzlmbot.hermes.mobile.core.GatewayConnection
 import com.snowzlmbot.hermes.mobile.core.GatewayProfile
 import com.snowzlmbot.hermes.mobile.core.GatewayProfileRepository
+import com.snowzlmbot.hermes.mobile.core.GatewaySignedOutException
+import com.snowzlmbot.hermes.mobile.core.OAuthTokenSet
 import com.snowzlmbot.hermes.mobile.core.ProfileStore
 import com.snowzlmbot.hermes.mobile.core.SecretValue
 import com.snowzlmbot.hermes.mobile.core.StoredGatewayAuth
+import java.time.Instant
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -42,6 +47,39 @@ class AppGraphTest {
     val graph = AppGraph(GatewayProfileRepository(profiles, RecordingCredentialStore()))
 
     assertNull(graph.restoreConnection())
+  }
+
+  @Test
+  fun clearingOAuthConnectionSignsOutTheActiveCoordinator() = runTest {
+    val repository = GatewayProfileRepository(RecordingProfileStore(), RecordingCredentialStore())
+    val profile = GatewayProfile("https://agent.example/", GatewayAuthMode.OAUTH, false)
+    val auth = StoredGatewayAuth.OAuth(
+      OAuthTokenSet(
+        accessToken = SecretValue("access-private"),
+        refreshToken = SecretValue("refresh-private"),
+        expiresAt = Instant.ofEpochSecond(20_000),
+        provider = "nous",
+        userId = "user-1",
+      ),
+    )
+    repository.save(profile, auth)
+    val connection = GatewayConnection(profile, auth)
+    val coordinator = GatewayAuthCoordinator(connection, repository)
+    val graph = AppGraph(
+      connections = repository,
+      authCoordinatorFactory = { _, _ -> coordinator },
+    )
+    graph.runtime(connection)
+
+    graph.clearConnection()
+
+    assertNull(repository.load())
+    try {
+      coordinator.socketCredential()
+      throw AssertionError("Expected the active OAuth coordinator to be signed out")
+    } catch (_: GatewaySignedOutException) {
+      // Expected: clearing the app connection invalidates in-flight auth state.
+    }
   }
 
   private class RecordingProfileStore : ProfileStore {
