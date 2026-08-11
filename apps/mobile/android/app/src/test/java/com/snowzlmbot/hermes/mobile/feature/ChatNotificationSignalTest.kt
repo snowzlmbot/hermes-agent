@@ -23,11 +23,11 @@ class ChatNotificationSignalTest {
 
     controller.connect()
     controller.newSession()
-    emit(GatewayEventType.MESSAGE_COMPLETE, "message.complete")
-    emit(GatewayEventType.APPROVAL_REQUEST, "approval.request")
-    emit(GatewayEventType.CLARIFY_REQUEST, "clarify.request")
-    emit(GatewayEventType.SECRET_REQUEST, "secret.request")
-    emit(GatewayEventType.SUDO_REQUEST, "sudo.request")
+    runtime.emit(GatewayEventType.MESSAGE_COMPLETE, "message.complete")
+    runtime.emit(GatewayEventType.APPROVAL_REQUEST, "approval.request")
+    runtime.emit(GatewayEventType.CLARIFY_REQUEST, "clarify.request")
+    runtime.emit(GatewayEventType.SECRET_REQUEST, "secret.request")
+    runtime.emit(GatewayEventType.SUDO_REQUEST, "sudo.request")
     runCurrent()
 
     assertEquals(

@@ -63,7 +63,7 @@ class NotificationContractTest {
   @Test
   fun rejectsMissingScopeAndExtraMetadata() {
     val missing = NotificationContentFactory.openIntent(context, route)
-      .removeExtra(HermesNotificationContract.PROFILE_SCOPE_EXTRA)
+    missing.removeExtra(HermesNotificationContract.PROFILE_SCOPE_EXTRA)
     val extra = NotificationContentFactory.openIntent(context, route).putExtra("token", "forbidden")
     val consumed = mutableListOf<StoredSessionRoute>()
     NotificationIntentConsumer.consume(missing) { consumed += it }
