@@ -168,6 +168,36 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(replacement.storedID, "stored-replacement")
         XCTAssertEqual(model.state.runtimeSessionID, "runtime-replacement")
     }
+
+    @MainActor
+    func testSessionInfoStoredIdentityEmitsSelectionCorrection() async throws {
+        let socket = RecoverySocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .token("test-token"),
+            socketFactory: { _ in socket }
+        )
+        let model = ChatModel(transport: transport)
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-current", storedID: "stored-old")
+        let corrected = expectation(description: "stored identity corrected")
+        model.signalHandler = { signal in
+            guard signal == .sessionSelectionChanged(storedID: "stored-canonical") else { return }
+            corrected.fulfill()
+        }
+
+        await socket.push(
+            GatewayEvent(
+                type: .sessionInfo,
+                sessionID: "runtime-current",
+                payload: .object(["stored_session_id": .string("stored-canonical")])
+            )
+        )
+
+        await fulfillment(of: [corrected], timeout: 1)
+        XCTAssertEqual(model.state.storedSessionID, "stored-canonical")
+    }
 }
 
 private actor RecoveryNotificationService: NotificationScheduling {
@@ -248,6 +278,16 @@ private actor RecoverySocket: GatewaySocket {
 
     func respond(to request: JSONRPCRequest, result: JSONValue) {
         let data = try! JSONEncoder().encode(JSONRPCResponse(id: request.id, result: result))
+        if let continuation = incomingWaiters.first {
+            incomingWaiters.removeFirst()
+            continuation.resume(returning: data)
+        } else {
+            incoming.append(data)
+        }
+    }
+
+    func push(_ event: GatewayEvent) {
+        let data = try! JSONEncoder().encode(JSONRPCEventFrame(event: event))
         if let continuation = incomingWaiters.first {
             incomingWaiters.removeFirst()
             continuation.resume(returning: data)

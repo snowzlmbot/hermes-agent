@@ -118,6 +118,49 @@ final class GatewayTransportTests: XCTestCase {
         let event = await transport.nextEvent()
         XCTAssertEqual(event?.type, .gatewayReady)
     }
+
+    func testReceiveFailureFinishesPendingEventWaiter() async throws {
+        let socket = TestSocket()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .token("test-token"),
+            socketFactory: { _ in socket }
+        )
+        try await transport.connect()
+        let finished = expectation(description: "event waiter finished")
+        let waiter = Task {
+            let event = await transport.nextEvent()
+            XCTAssertNil(event)
+            finished.fulfill()
+        }
+
+        await socket.fail()
+        await fulfillment(of: [finished], timeout: 1)
+        _ = await waiter.value
+    }
+
+    func testCancellingReconnectCannotInstallReplacementSocket() async throws {
+        let first = TestSocket()
+        let second = TestSocket()
+        let sockets = SocketQueue([first, second])
+        let tickets = ReconnectTicketGate()
+        let endpoint = try GatewayEndpoint(rawValue: "https://gateway.example.com")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .ticketProvider { try await tickets.next() },
+            socketFactory: { _ in sockets.next() }
+        )
+        try await transport.connect()
+        let reconnect = Task { try await transport.reconnect(maxAttempts: 1) }
+        await tickets.waitUntilReconnectRequested()
+
+        reconnect.cancel()
+        await tickets.releaseReconnect()
+        _ = try? await reconnect.value
+
+        XCTAssertEqual(sockets.createdCount, 1)
+    }
 }
 
 private actor ReconnectTicketGate {
@@ -167,6 +210,7 @@ private actor TicketRecorder {
 private final class SocketQueue: @unchecked Sendable {
     private let lock = NSLock()
     private var sockets: [any GatewaySocket]
+    private var count = 0
 
     init(_ sockets: [any GatewaySocket]) {
         self.sockets = sockets
@@ -175,7 +219,14 @@ private final class SocketQueue: @unchecked Sendable {
     func next() -> any GatewaySocket {
         lock.lock()
         defer { lock.unlock() }
+        count += 1
         return sockets.removeFirst()
+    }
+
+    var createdCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
     }
 }
 
