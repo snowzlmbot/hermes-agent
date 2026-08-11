@@ -336,10 +336,10 @@ public final class AppModel {
 
     private func commitSelectedSessionID(_ storedSessionID: String?) async {
         selectedSessionID = storedSessionID
-        guard let profileID = profile?.id else { return }
+        guard let profile else { return }
         await dependencies.profileRepository.saveStoredSessionID(
             storedSessionID,
-            profileID: profileID
+            for: profile
         )
     }
 
@@ -382,7 +382,7 @@ public final class AppModel {
               let chatModel else { return }
 
         let persistedSessionID = await dependencies.profileRepository.loadStoredSessionID(
-            profileID: profile.id
+            for: profile
         )
         guard recoveryGeneration == sceneRecoveryGeneration,
               selectionGeneration == sessionSelectionGeneration,
@@ -447,13 +447,13 @@ public final class AppModel {
         )
         configureSignals(for: chatModel)
 
-        let storedSessionID = await repository.loadStoredSessionID(profileID: profile.id)
+        let storedSessionID = await repository.loadStoredSessionID(for: profile)
         try await chatModel.connect()
         let active = try await chatModel.restoreSession(
             storedSessionID: storedSessionID,
             profileID: profile.id
         )
-        await repository.saveStoredSessionID(active.storedID, profileID: profile.id)
+        await repository.saveStoredSessionID(active.storedID, for: profile)
 
         self.profile = profile
         self.gatewayRESTClient = restClient

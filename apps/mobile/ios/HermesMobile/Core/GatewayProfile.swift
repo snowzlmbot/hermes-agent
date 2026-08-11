@@ -7,6 +7,14 @@ public struct GatewayProfile: Identifiable, Codable, Equatable, Hashable, Sendab
     public var authMode: GatewayAuthMode
     public var allowInsecure: Bool
 
+    public var sessionSelectionScope: String {
+        let normalizedEndpoint = (try? GatewayEndpoint(
+            rawValue: endpoint,
+            allowInsecureRemote: allowInsecure
+        ).baseURL.absoluteString) ?? endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(id)|\(normalizedEndpoint)"
+    }
+
     public init(
         id: String = "default",
         name: String = "Hermes",
@@ -178,6 +186,14 @@ public actor GatewayProfileRepository {
         _ = try GatewayEndpoint(rawValue: profile.endpoint, allowInsecureRemote: profile.allowInsecure)
         try await credentialStore.save(credentials)
         try await profileStore.save(profile)
+    }
+
+    public func loadStoredSessionID(for profile: GatewayProfile) async -> String? {
+        await loadStoredSessionID(profileID: profile.sessionSelectionScope)
+    }
+
+    public func saveStoredSessionID(_ storedSessionID: String?, for profile: GatewayProfile) async {
+        await saveStoredSessionID(storedSessionID, profileID: profile.sessionSelectionScope)
     }
 
     public func loadStoredSessionID(profileID: String) async -> String? {
