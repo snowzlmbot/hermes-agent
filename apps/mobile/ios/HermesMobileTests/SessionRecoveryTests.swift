@@ -43,7 +43,7 @@ final class SessionRecoveryTests: XCTestCase {
         )
         let initialResume = await initialSocket.waitForRequests(count: 2)
         XCTAssertEqual(initialResume[1].method, GatewayMethod.sessionResume)
-        XCTAssertEqual(initialResume[1].params["session_id"], .string("stored-target"))
+        XCTAssertEqual(initialResume[1].params?["session_id"], .string("stored-target"))
         await initialSocket.respond(
             to: initialResume[1],
             result: activeSessionResult(runtimeID: "runtime-initial", storedID: "stored-target")
@@ -63,7 +63,7 @@ final class SessionRecoveryTests: XCTestCase {
         )
         let recoveryResume = await foregroundSocket.waitForRequests(count: 2)
         XCTAssertEqual(recoveryResume[1].method, GatewayMethod.sessionResume)
-        XCTAssertEqual(recoveryResume[1].params["session_id"], .string("stored-target"))
+        XCTAssertEqual(recoveryResume[1].params?["session_id"], .string("stored-target"))
         await foregroundSocket.respond(
             to: recoveryResume[1],
             result: activeSessionResult(runtimeID: "runtime-foreground", storedID: "stored-target")
@@ -94,8 +94,7 @@ final class SessionRecoveryTests: XCTestCase {
         let staleRecovery = Task {
             try? await model.reconnectAndRestore(
                 storedSessionID: "stored-stale",
-                profileID: "default",
-                maxAttempts: 1
+                profileID: "default"
             )
         }
         let staleList = await replacementSocket.waitForRequests(count: 1)
@@ -116,7 +115,7 @@ final class SessionRecoveryTests: XCTestCase {
             to: staleList[0],
             result: sessionListResult(["stored-stale"])
         )
-        _ = await staleRecovery.value
+        _ = staleRecovery.value
 
         let finalRequests = await replacementSocket.requestsSnapshot()
         XCTAssertEqual(finalRequests.count, 2)
