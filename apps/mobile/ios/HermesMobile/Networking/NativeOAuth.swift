@@ -9,6 +9,7 @@ public enum NativeOAuthError: Error, Equatable, Sendable {
     case cancelled
     case invalidCallback
     case invalidRequest
+    case insecureTransport
     case missingAuthorizationCode
     case providerRejected
     case stateMismatch
@@ -54,6 +55,10 @@ public struct NativeAuthorizationRequest: Equatable, Sendable {
         challenge: String,
         state: String
     ) throws {
+        let scheme = endpoint.baseURL.scheme?.lowercased()
+        let host = endpoint.baseURL.host?.lowercased()
+        let secure = scheme == "https" || (scheme == "http" && host.map(GatewayEndpoint.loopbackHosts.contains) == true)
+        guard secure else { throw NativeOAuthError.insecureTransport }
         guard !state.isEmpty, (43 ... 128).contains(verifier.count), !challenge.isEmpty else {
             throw NativeOAuthError.invalidRequest
         }

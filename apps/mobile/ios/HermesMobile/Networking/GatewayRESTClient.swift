@@ -40,6 +40,8 @@ public actor GatewayRESTClient {
     private let endpoint: GatewayEndpoint
     private let session: URLSession
     private var credentials: GatewayCredentials
+    private var refreshTask: Task<GatewayCredentials, Error>?
+    private var isInvalidated = false
     private let persistCredentials: @Sendable (GatewayCredentials) async throws -> Void
 
     public init(
@@ -113,6 +115,16 @@ public actor GatewayRESTClient {
         return ticket
     }
 
+    public func invalidate() async {
+        isInvalidated = true
+        let task = refreshTask
+        task?.cancel()
+        if let task {
+            _ = try? await task.value
+        }
+        refreshTask = nil
+    }
+
     public func transcription(dataURL: String, mimeType: String) async throws -> String {
         let data = try await sendJSON(
             path: "api/audio/transcribe",
@@ -134,90 +146,152 @@ public actor GatewayRESTClient {
     }
 
     public func patchSession(_ mutation: SessionMutation) async throws {
-        try await refreshOAuthIfNeeded()
-        let request = try GatewayRESTRequestBuilder.patchSessionRequest(
-            endpoint: endpoint,
-            auth: credentials.auth,
-            storedID: mutation.storedID,
-            title: mutation.title,
-            archived: mutation.archived,
-            pinned: mutation.pinned
-        )
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            if http.statusCode == 401 { throw GatewayRESTError.expiredSession }
-            throw GatewayRESTError.http(http.statusCode, "Session update failed")
+        _ = try await sendAuthorizedRequest { auth in
+            try GatewayRESTRequestBuilder.patchSessionRequest(
+                endpoint: endpoint,
+                auth: auth,
+                storedID: mutation.storedID,
+                title: mutation.title,
+                archived: mutation.archived,
+                pinned: mutation.pinned
+            )
         }
     }
 
     public func deleteSession(_ storedID: String) async throws {
-        try await refreshOAuthIfNeeded()
-        let request = try GatewayRESTRequestBuilder.deleteSessionRequest(
-            endpoint: endpoint,
-            auth: credentials.auth,
-            storedID: storedID
-        )
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            if http.statusCode == 401 { throw GatewayRESTError.expiredSession }
-            throw GatewayRESTError.http(http.statusCode, Self.detail(from: data))
+        _ = try await sendAuthorizedRequest { auth in
+            try GatewayRESTRequestBuilder.deleteSessionRequest(
+                endpoint: endpoint,
+                auth: auth,
+                storedID: storedID
+            )
         }
     }
 
     private func sendJSON(path: String, body: [String: Any], method: String = "POST") async throws -> Data {
+        try await sendAuthorizedRequest { auth in
+            try GatewayRESTRequestBuilder.request(
+                endpoint: endpoint,
+                path: path,
+                method: method,
+                auth: auth,
+                body: body
+            )
+        }
+    }
+
+    private func sendAuthorizedRequest(
+        makeRequest: (StoredGatewayAuth) throws -> URLRequest
+    ) async throws -> Data {
+        guard !isInvalidated else { throw GatewayRESTError.expiredSession }
         try await refreshOAuthIfNeeded()
-        let request = try GatewayRESTRequestBuilder.request(
-            endpoint: endpoint,
-            path: path,
-            method: method,
-            auth: credentials.auth,
-            body: body
-        )
+        guard !isInvalidated else { throw GatewayRESTError.expiredSession }
+        let attemptedAuth = credentials.auth
+        let request = try makeRequest(attemptedAuth)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            if http.statusCode == 401 { throw GatewayRESTError.expiredSession }
-            throw GatewayRESTError.http(http.statusCode, Self.detail(from: data))
+        guard http.statusCode == 401 else {
+            return try Self.validatedData(data, response: http)
+        }
+
+        try await refreshOAuthAfterUnauthorized(authUsed: attemptedAuth)
+        guard !isInvalidated else { throw GatewayRESTError.expiredSession }
+        let retry = try makeRequest(credentials.auth)
+        let (retryData, retryResponse) = try await session.data(for: retry)
+        guard let retryHTTP = retryResponse as? HTTPURLResponse else {
+            throw GatewayRESTError.invalidResponse
+        }
+        return try Self.validatedData(retryData, response: retryHTTP)
+    }
+
+    private static func validatedData(_ data: Data, response: HTTPURLResponse) throws -> Data {
+        guard (200 ..< 300).contains(response.statusCode) else {
+            if response.statusCode == 401 { throw GatewayRESTError.expiredSession }
+            throw GatewayRESTError.http(response.statusCode, detail(from: data))
         }
         return data
     }
 
-
     private func refreshOAuthIfNeeded(now: Double = Date().timeIntervalSince1970) async throws {
+        if let current = refreshTask {
+            credentials = try await current.value
+            return
+        }
         guard case .oauth(let tokens) = credentials.auth else { return }
         guard tokens.expiresAt <= 0 || now >= tokens.expiresAt - 60 else { return }
-        guard !tokens.refreshToken.isEmpty else { throw GatewayRESTError.expiredSession }
+        try await refreshOAuth(tokens: tokens)
+    }
 
+    private func refreshOAuthAfterUnauthorized(authUsed: StoredGatewayAuth) async throws {
+        guard case .oauth = authUsed,
+              case .oauth(let currentTokens) = credentials.auth else {
+            throw GatewayRESTError.expiredSession
+        }
+        guard credentials.auth == authUsed else { return }
+        try await refreshOAuth(tokens: currentTokens)
+    }
+
+    private func refreshOAuth(tokens: NativeTokenSet) async throws {
+        guard !isInvalidated else { throw GatewayRESTError.expiredSession }
+        guard !tokens.refreshToken.isEmpty else { throw GatewayRESTError.expiredSession }
+        if let current = refreshTask {
+            credentials = try await current.value
+            return
+        }
+
+        let endpoint = self.endpoint
+        let session = self.session
+        let storedEndpoint = credentials.endpoint
+        let persistCredentials = self.persistCredentials
+        let task = Task<GatewayCredentials, Error> {
+            try await Self.rotateOAuth(
+                tokens: tokens,
+                endpoint: endpoint,
+                session: session,
+                storedEndpoint: storedEndpoint,
+                persist: persistCredentials
+            )
+        }
+        refreshTask = task
+        defer { refreshTask = nil }
+        credentials = try await task.value
+    }
+
+    private static func rotateOAuth(
+        tokens: NativeTokenSet,
+        endpoint: GatewayEndpoint,
+        session: URLSession,
+        storedEndpoint: String?,
+        persist: @escaping @Sendable (GatewayCredentials) async throws -> Void
+    ) async throws -> GatewayCredentials {
         var request = URLRequest(url: endpoint.apiURL("auth/native/refresh"))
         request.httpMethod = "POST"
         request.timeoutInterval = 30
+        request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "refresh_token": tokens.refreshToken,
             "provider": tokens.provider
         ])
+
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
+        guard (200 ..< 300).contains(http.statusCode) else {
             if http.statusCode == 401 { throw GatewayRESTError.expiredSession }
-            throw GatewayRESTError.http(http.statusCode, Self.detail(from: data))
+            throw GatewayRESTError.http(http.statusCode, detail(from: data))
         }
-        guard let body = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let accessToken = body["access_token"] as? String,
-              let refreshToken = body["refresh_token"] as? String else {
-            throw GatewayRESTError.invalidResponse
-        }
+
+        let responseTokens = try nativeTokenSet(from: data)
         let refreshed = NativeTokenSet(
-            accessToken: accessToken,
-            refreshToken: refreshToken,
-            expiresAt: body["expires_at"] as? Double ?? 0,
-            provider: body["provider"] as? String ?? tokens.provider,
-            userID: body["user_id"] as? String ?? tokens.userID
+            accessToken: responseTokens.accessToken,
+            refreshToken: responseTokens.refreshToken,
+            expiresAt: responseTokens.expiresAt,
+            provider: responseTokens.provider.isEmpty ? tokens.provider : responseTokens.provider,
+            userID: responseTokens.userID.isEmpty ? tokens.userID : responseTokens.userID
         )
-        credentials = .oauth(refreshed, endpoint: credentials.endpoint)
-        try await persistCredentials(credentials)
+        let updatedCredentials = GatewayCredentials.oauth(refreshed, endpoint: storedEndpoint)
+        try await persist(updatedCredentials)
+        return updatedCredentials
     }
 
     private static func detail(from data: Data) -> String {

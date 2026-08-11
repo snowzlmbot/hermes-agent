@@ -65,8 +65,7 @@ struct OnboardingView: View {
                             Task {
                                 await appModel.signInWithOAuth(
                                     address: address,
-                                    provider: selectedProvider,
-                                    allowInsecure: allowInsecure
+                                    provider: selectedProvider
                                 )
                             }
                         }

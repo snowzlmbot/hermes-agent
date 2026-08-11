@@ -66,8 +66,15 @@ public actor HermesGatewayTransport {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
+    private struct ConnectionAttempt {
+        let id: Int
+        let task: Task<GatewayAuth, Error>
+    }
+
     private var socket: (any GatewaySocket)?
     private var receiver: Task<Void, Never>?
+    private var connectionAttempt: ConnectionAttempt?
+    private var connectionAttemptSequence = 0
     private var requestSequence = 0
     private var pending: [JSONRPCID: CheckedContinuation<JSONValue, Error>] = [:]
     private var events: [GatewayEvent] = []
@@ -89,17 +96,46 @@ public actor HermesGatewayTransport {
     public func connect() async throws {
         intentionallyDisconnected = false
         guard socket == nil else { return }
-        let dialAuth = try await resolveDialAuth()
-        let nextSocket = socketFactory(endpoint.webSocketURL(auth: dialAuth))
-        socket = nextSocket
-        receiver = Task { [weak self] in
-            await self?.receiveLoop(socket: nextSocket)
+
+        let attempt: ConnectionAttempt
+        if let current = connectionAttempt {
+            attempt = current
+        } else {
+            connectionAttemptSequence += 1
+            let id = connectionAttemptSequence
+            let auth = self.auth
+            let task = Task<GatewayAuth, Error> {
+                try await Self.resolveDialAuth(auth)
+            }
+            attempt = ConnectionAttempt(id: id, task: task)
+            connectionAttempt = attempt
         }
-        await hooks.onConnected()
+
+        do {
+            let dialAuth = try await attempt.task.value
+            if socket != nil { return }
+            guard connectionAttempt?.id == attempt.id, !intentionallyDisconnected else {
+                throw CancellationError()
+            }
+            connectionAttempt = nil
+            let nextSocket = socketFactory(endpoint.webSocketURL(auth: dialAuth))
+            socket = nextSocket
+            receiver = Task { [weak self] in
+                await self?.receiveLoop(socket: nextSocket)
+            }
+            await hooks.onConnected()
+        } catch {
+            if connectionAttempt?.id == attempt.id {
+                connectionAttempt = nil
+            }
+            throw error
+        }
     }
 
     public func disconnect() async {
         intentionallyDisconnected = true
+        connectionAttempt?.task.cancel()
+        connectionAttempt = nil
         receiver?.cancel()
         receiver = nil
         let current = socket
@@ -137,6 +173,8 @@ public actor HermesGatewayTransport {
 
     public func reconnect(maxAttempts: Int = 5) async throws {
         let attempts = max(1, maxAttempts)
+        connectionAttempt?.task.cancel()
+        connectionAttempt = nil
         receiver?.cancel()
         receiver = nil
         let oldSocket = socket
@@ -162,7 +200,7 @@ public actor HermesGatewayTransport {
         throw GatewayTransportError.reconnectExhausted
     }
 
-    private func resolveDialAuth() async throws -> GatewayAuth {
+    private static func resolveDialAuth(_ auth: GatewayAuth) async throws -> GatewayAuth {
         switch auth {
         case .token, .ticket: return auth
         case .ticketProvider(let provider): return .ticket(try await provider())

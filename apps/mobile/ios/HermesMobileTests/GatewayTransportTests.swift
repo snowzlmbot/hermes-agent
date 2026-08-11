@@ -48,6 +48,23 @@ final class GatewayTransportTests: XCTestCase {
         XCTAssertEqual(attempts, [1])
     }
 
+    func testConcurrentConnectsShareOneTicket() async throws {
+        let socket = TestSocket()
+        let source = TicketRecorder()
+        let endpoint = try GatewayEndpoint(rawValue: "https://gateway.example.com")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .ticketProvider { try await source.nextSlow() },
+            socketFactory: { _ in socket }
+        )
+
+        async let first: Void = transport.connect()
+        async let second: Void = transport.connect()
+        _ = try await (first, second)
+        let ticketCount = await source.count
+        XCTAssertEqual(ticketCount, 1)
+    }
+
     func testTicketProviderMintsFreshTicketForEveryConnection() async throws {
         let socket = TestSocket()
         let endpoint = try GatewayEndpoint(rawValue: "https://gateway.example.com")
@@ -80,6 +97,11 @@ private actor HookRecorder {
 
 private actor TicketRecorder {
     var count = 0
+
+    func nextSlow() async throws -> String {
+        try await Task.sleep(for: .milliseconds(100))
+        return next()
+    }
 
     func next() -> String {
         count += 1

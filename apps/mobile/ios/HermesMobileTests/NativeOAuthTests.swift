@@ -4,6 +4,15 @@ import XCTest
 @testable import HermesMobile
 
 final class NativeOAuthTests: XCTestCase {
+    func testRejectsRemoteCleartextOAuthButAllowsLoopback() throws {
+        let remote = try GatewayEndpoint(rawValue: "http://agent.example", allowInsecureRemote: true)
+        XCTAssertThrowsError(try NativeAuthorizationRequest(endpoint: remote)) { error in
+            XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
+        }
+        let loopback = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        XCTAssertNoThrow(try NativeAuthorizationRequest(endpoint: loopback))
+    }
+
     func testAuthorizationURLUsesRegisteredCallbackAndPKCE() throws {
         let endpoint = try GatewayEndpoint(rawValue: "https://agent.example/hermes/")
         let request = try NativeAuthorizationRequest(

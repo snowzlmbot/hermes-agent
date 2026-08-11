@@ -94,14 +94,14 @@ public final class AppModel {
         }
     }
 
-    public func signInWithOAuth(address: String, provider: String, allowInsecure: Bool) async {
+    public func signInWithOAuth(address: String, provider: String) async {
         guard !isConnecting else { return }
         isConnecting = true
         errorMessage = nil
         defer { isConnecting = false }
 
         do {
-            let endpoint = try GatewayEndpoint(rawValue: address, allowInsecureRemote: allowInsecure)
+            let endpoint = try GatewayEndpoint(rawValue: address)
             let status = try await GatewayRESTClient.status(endpoint: endpoint, session: dependencies.urlSession)
             let capability = status.nativeOAuthCapability
             oauthCapability = capability
@@ -135,7 +135,7 @@ public final class AppModel {
                 name: String(localized: "profile.default.name"),
                 endpoint: endpoint.baseURL.absoluteString,
                 authMode: .oauth,
-                allowInsecure: allowInsecure
+                allowInsecure: false
             )
             let credentials = GatewayCredentials.oauth(tokens, endpoint: profile.endpoint)
             try await dependencies.profileRepository.save(profile: profile, credentials: credentials)
@@ -151,6 +151,7 @@ public final class AppModel {
 
     public func disconnectAndForget() async {
         await chatModel?.disconnect()
+        await gatewayRESTClient?.invalidate()
         do {
             try await dependencies.profileRepository.clear()
         } catch {
