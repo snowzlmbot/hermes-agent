@@ -349,7 +349,12 @@ class FakeGatewayContractTests(unittest.TestCase):
         self.assertTrue(notification_routing["single_consume"])
         self.assertIn("session_id", notification_routing["forbidden_fields"])
         self.assertIn("token", notification_routing["forbidden_fields"])
+        self.assertIn("ticket", notification_routing["forbidden_fields"])
+        self.assertIn("content", notification_routing["forbidden_fields"])
+        self.assertIn("prompt", notification_routing["forbidden_fields"])
+        self.assertIn("approval", notification_routing["forbidden_fields"])
         self.assertEqual(contract["responses"]["sudo.respond"], "password")
+        self.assertEqual(contract["attachments"]["file.attach"]["bytes_field"], "data_url")
         self.assertEqual(contract["frames"]["request"]["jsonrpc"], "2.0")
         self.assertEqual(contract["frames"]["event"]["method"], "event")
 
