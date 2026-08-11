@@ -30,4 +30,20 @@ class NativeOAuthCallbackTest {
       )
     }
   }
+
+  @Test
+  fun rejectsDuplicateStateAndCodeParameters() {
+    assertThrows(NativeOAuthException::class.java) {
+      NativeOAuthCallback.fromUri(
+        URI("com.snowzlmbot.hermes.mobile:/oauth/callback?code=one&state=expected&state=expected"),
+        expectedState = "expected",
+      )
+    }
+    assertThrows(NativeOAuthException::class.java) {
+      NativeOAuthCallback.fromUri(
+        URI("com.snowzlmbot.hermes.mobile:/oauth/callback?code=one&code=two&state=expected"),
+        expectedState = "expected",
+      )
+    }
+  }
 }

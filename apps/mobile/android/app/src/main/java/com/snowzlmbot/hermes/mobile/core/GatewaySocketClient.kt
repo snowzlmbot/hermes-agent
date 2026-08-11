@@ -53,32 +53,56 @@ class GatewaySocketClient(
 
   @Volatile
   private var socket: WebSocket? = null
+  private var connectionGeneration: Long = 0
+  private var permanentlyClosed = false
 
   override val events: SharedFlow<GatewayEvent> = mutableEvents
   val state: StateFlow<SocketState> = mutableState
 
   override suspend fun connect() {
     connectMutex.withLock {
-      synchronized(socketLock) {
+      val generation = synchronized(socketLock) {
+        check(!permanentlyClosed) { "Gateway WebSocket client is closed" }
         if (socket != null && mutableState.value == SocketState.CONNECTED) return@withLock
+        connectionGeneration += 1
         mutableState.value = SocketState.CONNECTING
+        connectionGeneration
       }
       val credential = credentialProvider()
+      ensureCurrentGeneration(generation)
       val url = endpoint.webSocketUrl(credential).toString()
       val opened = CompletableDeferred<Unit>()
       val candidate = httpClient.newWebSocket(
         Request.Builder().url(url).build(),
-        listener(opened),
+        listener(opened, generation),
       )
-      synchronized(socketLock) { socket = candidate }
+      val accepted = synchronized(socketLock) {
+        if (permanentlyClosed || connectionGeneration != generation) {
+          false
+        } else {
+          if (socket == null || socket === candidate) socket = candidate
+          socket === candidate
+        }
+      }
+      if (!accepted) {
+        candidate.cancel()
+        throw IllegalStateException("Gateway WebSocket connection was superseded")
+      }
       try {
         withTimeout(15_000) { opened.await() }
+        ensureCurrentSocket(candidate, generation)
       } catch (error: Throwable) {
         candidate.cancel()
-        synchronized(socketLock) {
-          if (socket === candidate) socket = null
+        val current = synchronized(socketLock) {
+          if (connectionGeneration == generation && socket === candidate) {
+            socket = null
+            if (!permanentlyClosed) mutableState.value = SocketState.FAILED
+            true
+          } else {
+            false
+          }
         }
-        mutableState.value = SocketState.FAILED
+        if (current) failPending(error)
         throw error
       }
     }
@@ -106,6 +130,7 @@ class GatewaySocketClient(
 
   fun disconnect() {
     val current = synchronized(socketLock) {
+      connectionGeneration += 1
       socket.also { socket = null }
     }
     current?.close(1000, "client disconnect")
@@ -114,18 +139,43 @@ class GatewaySocketClient(
   }
 
   override fun close() {
-    disconnect()
+    val current = synchronized(socketLock) {
+      permanentlyClosed = true
+      connectionGeneration += 1
+      socket.also { socket = null }
+    }
+    current?.close(1000, "client close")
+    mutableState.value = SocketState.DISCONNECTED
+    failPending(IllegalStateException("Gateway WebSocket client closed"))
     httpClient.dispatcher.cancelAll()
   }
 
-  private fun listener(opened: CompletableDeferred<Unit>): WebSocketListener =
+  private fun listener(opened: CompletableDeferred<Unit>, generation: Long): WebSocketListener =
     object : WebSocketListener() {
       override fun onOpen(webSocket: WebSocket, response: Response) {
-        mutableState.value = SocketState.CONNECTED
-        opened.complete(Unit)
+        val accepted = synchronized(socketLock) {
+          if (permanentlyClosed || connectionGeneration != generation) {
+            false
+          } else if (socket == null || socket === webSocket) {
+            socket = webSocket
+            mutableState.value = SocketState.CONNECTED
+            true
+          } else {
+            false
+          }
+        }
+        if (accepted) {
+          opened.complete(Unit)
+        } else {
+          webSocket.cancel()
+          opened.completeExceptionally(
+            IllegalStateException("Gateway WebSocket connection was superseded"),
+          )
+        }
       }
 
       override fun onMessage(webSocket: WebSocket, text: String) {
+        if (!isCurrentSocket(webSocket, generation)) return
         when (val frame = runCatching { JsonRpcCodec.decode(text) }.getOrNull()) {
           is JsonRpcFrame.Success -> pending.remove(frame.id)?.complete(frame.result)
           is JsonRpcFrame.Failure -> frame.id?.let { id ->
@@ -141,23 +191,48 @@ class GatewaySocketClient(
       }
 
       override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-        markDisconnected(webSocket, IllegalStateException("Gateway WebSocket closed"))
+        markDisconnected(webSocket, generation, IllegalStateException("Gateway WebSocket closed"))
       }
 
       override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
         if (!opened.isCompleted) opened.completeExceptionally(
           IllegalStateException("Could not connect to Hermes gateway", t),
         )
-        markDisconnected(webSocket, IllegalStateException("Gateway WebSocket failed", t))
+        markDisconnected(webSocket, generation, IllegalStateException("Gateway WebSocket failed", t))
       }
     }
 
-  private fun markDisconnected(webSocket: WebSocket, error: Throwable) {
-    synchronized(socketLock) {
-      if (socket === webSocket) socket = null
+  private fun markDisconnected(webSocket: WebSocket, generation: Long, error: Throwable) {
+    val current = synchronized(socketLock) {
+      if (connectionGeneration == generation && socket === webSocket) {
+        socket = null
+        if (!permanentlyClosed) mutableState.value = SocketState.DISCONNECTED
+        true
+      } else {
+        false
+      }
     }
-    mutableState.value = SocketState.DISCONNECTED
-    failPending(error)
+    if (current) failPending(error)
+  }
+
+  private fun ensureCurrentGeneration(generation: Long) {
+    check(
+      synchronized(socketLock) {
+        !permanentlyClosed && connectionGeneration == generation
+      },
+    ) { "Gateway WebSocket connection was superseded" }
+  }
+
+  private fun ensureCurrentSocket(candidate: WebSocket, generation: Long) {
+    check(isCurrentSocket(candidate, generation)) {
+      "Gateway WebSocket connection was superseded"
+    }
+  }
+
+  private fun isCurrentSocket(candidate: WebSocket, generation: Long): Boolean =
+    synchronized(socketLock) {
+      !permanentlyClosed && connectionGeneration == generation && socket === candidate
+    }
   }
 
   private fun failPending(error: Throwable) {

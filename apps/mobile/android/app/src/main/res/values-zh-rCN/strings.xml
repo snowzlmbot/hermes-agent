@@ -11,4 +11,12 @@
   <string name="model_confirmation_title">确认切换模型</string>
   <string name="action_confirm">确认</string>
   <string name="action_cancel">取消</string>
+  <string name="connection_guidance">输入安全的网关地址，然后使用 OAuth 登录或输入会话令牌。凭据将保存在加密存储中。</string>
+  <string name="oauth_sign_in_title">OAuth 登录</string>
+  <string name="oauth_sign_in_guidance">检查此网关支持哪些系统浏览器登录方式。</string>
+  <string name="oauth_check_options">检查登录方式</string>
+  <string name="oauth_checking">正在检查登录方式…</string>
+  <string name="oauth_sign_in_with">使用 %1$s 登录</string>
+  <string name="oauth_pending">请在浏览器中完成登录，然后返回 Hermes。</string>
+  <string name="oauth_cancel">取消登录</string>
 </resources>

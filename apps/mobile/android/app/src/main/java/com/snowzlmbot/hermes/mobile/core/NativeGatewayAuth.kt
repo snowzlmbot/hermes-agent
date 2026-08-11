@@ -130,12 +130,22 @@ class NativePkce private constructor(
 
     fun parseCallback(uri: URI, expectedState: String): String {
       validateMobileRedirect(uri)
-      val query = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
+      val queryPairs = uri.rawQuery.orEmpty().split('&').mapNotNull { part ->
         val split = part.split('=', limit = 2)
         split.firstOrNull()?.takeIf(String::isNotEmpty)?.let { name ->
-          name to java.net.URLDecoder.decode(split.getOrElse(1) { "" }, Charsets.UTF_8.name())
+          java.net.URLDecoder.decode(name, Charsets.UTF_8.name()) to
+            java.net.URLDecoder.decode(split.getOrElse(1) { "" }, Charsets.UTF_8.name())
         }
-      }.toMap()
+      }
+      val protectedParameters = setOf("code", "state", "error", "error_description")
+      val duplicateProtectedParameter = queryPairs
+        .groupingBy { it.first }
+        .eachCount()
+        .any { (name, count) -> name in protectedParameters && count > 1 }
+      if (duplicateProtectedParameter) {
+        throw NativeAuthException("OAuth callback contains duplicate security parameters")
+      }
+      val query = queryPairs.toMap()
       query["error"]?.let { error ->
         throw NativeAuthException(
           query["error_description"]?.let { "$error: $it" } ?: error,

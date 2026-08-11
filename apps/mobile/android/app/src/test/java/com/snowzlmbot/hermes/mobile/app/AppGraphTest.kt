@@ -82,6 +82,24 @@ class AppGraphTest {
     }
   }
 
+  @Test
+  fun staleConnectionCannotInstallRuntimeAfterClear() = runTest {
+    val repository = GatewayProfileRepository(RecordingProfileStore(), RecordingCredentialStore())
+    val profile = GatewayProfile("https://agent.example/", GatewayAuthMode.TOKEN, false)
+    repository.save(profile, SecretValue("private-token"))
+    val stale = requireNotNull(repository.load())
+    val graph = AppGraph(repository)
+
+    graph.clearConnection()
+
+    try {
+      graph.runtime(stale)
+      throw AssertionError("Expected stale connection to be rejected")
+    } catch (_: IllegalStateException) {
+      // The runtime rechecks repository state while holding the lifecycle lock.
+    }
+  }
+
   private class RecordingProfileStore : ProfileStore {
     var profile: GatewayProfile? = null
     val serialized: String get() = profile.toString()

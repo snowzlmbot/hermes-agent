@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
 
 import androidx.compose.material.icons.filled.Settings
@@ -126,7 +127,7 @@ private fun OnboardingScreen(state: AppUiState, viewModel: HermesAppViewModel) {
       Text("Hermes", style = MaterialTheme.typography.displaySmall)
       Text("Connect to a gateway", style = MaterialTheme.typography.headlineSmall)
       Text(
-        "Use a secure gateway address and a session token. The token is kept in encrypted storage.",
+        stringResource(R.string.connection_guidance),
         style = MaterialTheme.typography.bodyMedium,
       )
       OutlinedTextField(
@@ -162,6 +163,65 @@ private fun OnboardingScreen(state: AppUiState, viewModel: HermesAppViewModel) {
         Spacer(Modifier.width(8.dp))
         Text("Connect")
       }
+      NativeOAuthSection(
+        state = state,
+        address = address,
+        onDiscover = viewModel::discoverOAuth,
+        onStart = viewModel::startOAuth,
+        onCancel = viewModel::cancelOAuth,
+      )
+    }
+  }
+}
+
+@Composable
+internal fun NativeOAuthSection(
+  state: AppUiState,
+  address: String,
+  onDiscover: (String) -> Unit,
+  onStart: (String, String) -> Unit,
+  onCancel: () -> Unit,
+) {
+  HorizontalDivider()
+  Text(stringResource(R.string.oauth_sign_in_title), style = MaterialTheme.typography.titleMedium)
+  Text(
+    stringResource(R.string.oauth_sign_in_guidance),
+    style = MaterialTheme.typography.bodyMedium,
+  )
+  OutlinedButton(
+    onClick = { onDiscover(address) },
+    enabled = address.isNotBlank() && !state.isOAuthBusy && !state.isOAuthPending,
+    modifier = Modifier.fillMaxWidth().testTag("oauth-discover"),
+  ) {
+    Text(
+      if (state.isOAuthBusy) {
+        stringResource(R.string.oauth_checking)
+      } else {
+        stringResource(R.string.oauth_check_options)
+      },
+    )
+  }
+  state.oauthProviders.forEach { provider ->
+    Button(
+      onClick = { onStart(address, provider.name) },
+      enabled = !state.isOAuthBusy && !state.isOAuthPending,
+      modifier = Modifier.fillMaxWidth().testTag("oauth-provider-${provider.name}"),
+    ) {
+      Icon(Icons.Default.Person, contentDescription = null)
+      Spacer(Modifier.width(8.dp))
+      Text(stringResource(R.string.oauth_sign_in_with, provider.displayName))
+    }
+  }
+  if (state.isOAuthPending) {
+    Text(
+      stringResource(R.string.oauth_pending),
+      style = MaterialTheme.typography.bodySmall,
+    )
+    TextButton(
+      onClick = onCancel,
+      modifier = Modifier.testTag("oauth-cancel"),
+    ) {
+      Text(stringResource(R.string.oauth_cancel))
     }
   }
 }
