@@ -193,8 +193,7 @@ public final class ChatModel {
         }
         applySessions(parsed)
 
-        if let storedSessionID,
-           parsed.contains(where: { $0.storedID == storedSessionID }) {
+        if let storedSessionID, !storedSessionID.isEmpty {
             do {
                 let active = try await requestResume(
                     storedSessionID: storedSessionID,
@@ -206,7 +205,13 @@ public final class ChatModel {
                 }
                 return active
             } catch GatewayTransportError.rpc(let error) where error.code == 4007 {
-                // The persisted session was deleted remotely after it was listed.
+                try Task.checkCancellation()
+                guard isCurrentSessionListOperation(listGeneration),
+                      isCurrentSessionOperation(sessionGeneration),
+                      connectionGeneration.map(isCurrentConnectionOperation) ?? true else {
+                    throw CancellationError()
+                }
+                signalHandler?(.sessionSelectionChanged(storedID: nil))
             }
         }
         let active = try await requestCreate(profileID: profileID, generation: sessionGeneration)
@@ -693,9 +698,12 @@ public final class ChatModel {
                 )
             }
             if let storedID = payload["stored_session_id"]?.stringValue,
+               !storedID.isEmpty,
                let runtimeID = event.sessionID,
-               state.runtimeSessionID == runtimeID {
+               state.runtimeSessionID == runtimeID,
+               state.storedSessionID != storedID {
                 state.storedSessionID = storedID
+                signalHandler?(.sessionSelectionChanged(storedID: storedID))
             }
         case .messageStart:
             ChatReducer.reduce(&state, action: .messageStarted(sessionID: event.sessionID))

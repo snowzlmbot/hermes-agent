@@ -53,6 +53,9 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
   private var controller: ChatController? = null
   private var chatCollection: kotlinx.coroutines.Job? = null
   private var connectJob: Job? = null
+  private var forgetJob: Job? = null
+  private var forgetInFlight = false
+  private var forgetGeneration = 0L
   private var connectionGeneration = 0L
   private var oauthDiscovery: NativeOAuthDiscovery? = null
   private var pendingOAuth: PendingNativeOAuth? = null
@@ -63,11 +66,11 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
   private val processLifecycleObserver = object : DefaultLifecycleObserver {
     override fun onStop(owner: LifecycleOwner) {
       foregroundRecoveryArmed = true
-      nextConnectionGeneration()
+      connectJob?.cancel()
     }
 
     override fun onStart(owner: LifecycleOwner) {
-      if (!foregroundRecoveryArmed) return
+      if (!foregroundRecoveryArmed || forgetInFlight) return
       foregroundRecoveryArmed = false
       startConnectSaved()
     }
@@ -257,18 +260,30 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
 
   fun forgetConnection() {
     resetOAuthFlow()
+    foregroundRecoveryArmed = false
     val generation = nextConnectionGeneration()
-    connectJob = viewModelScope.launch {
-      controller?.close()
-      controller = null
-      chatCollection?.cancel()
-      chatCollection = null
-      graph.restoreConnection()?.profile?.address?.let { address ->
-        AndroidStoredSessionSelectionStore(getApplication<Application>(), address).clear()
-      }
-      graph.clearConnection()
-      if (isCurrentConnection(generation)) {
-        mutableState.value = AppUiState(screen = AppScreen.ONBOARDING)
+    forgetGeneration += 1
+    val forgetOperation = forgetGeneration
+    forgetInFlight = true
+    forgetJob?.cancel()
+    forgetJob = viewModelScope.launch {
+      try {
+        controller?.close()
+        controller = null
+        chatCollection?.cancel()
+        chatCollection = null
+        graph.restoreConnection()?.profile?.address?.let { address ->
+          AndroidStoredSessionSelectionStore(getApplication<Application>(), address).clear()
+        }
+        graph.clearConnection()
+        if (isCurrentConnection(generation)) {
+          mutableState.value = AppUiState(screen = AppScreen.ONBOARDING)
+        }
+      } finally {
+        if (forgetGeneration == forgetOperation) {
+          forgetInFlight = false
+          forgetJob = null
+        }
       }
     }
   }
@@ -370,6 +385,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
   override fun onCleared() {
     ProcessLifecycleOwner.get().lifecycle.removeObserver(processLifecycleObserver)
     nextConnectionGeneration()
+    forgetJob?.cancel()
     resetOAuthFlow()
     oauthBrowserChannel.close()
     controller?.close()

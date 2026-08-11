@@ -192,4 +192,5 @@ public enum ChatSignal: Equatable, Sendable {
     case approvalRequired(sessionID: String?)
     case inputRequired(sessionID: String?)
     case sessionsChanged
+    case sessionSelectionChanged(storedID: String?)
 }

@@ -166,10 +166,7 @@ internal class ChatController(
     if (!connect()) return false
     val storedId = selectionStore.load()?.takeIf(String::isNotBlank)
       ?: return newSession()
-    if (mutableState.value.sessions.none { it.storedId == storedId }) {
-      selectionStore.clear()
-      return newSession()
-    }
+    if (storedId.isBlank()) return newSession()
     return openSession(storedId)
   }
 

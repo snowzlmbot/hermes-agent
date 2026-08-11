@@ -158,10 +158,13 @@ final class SessionRecoveryTests: XCTestCase {
         }
         let secondList = await socket.waitForRequests(count: 3)
         await socket.respond(to: secondList[2], result: sessionListResult(["stored-other"]))
-        let secondCreate = await socket.waitForRequests(count: 4)
-        XCTAssertEqual(secondCreate[3].method, GatewayMethod.sessionCreate)
+        let secondResume = await socket.waitForRequests(count: 4)
+        XCTAssertEqual(secondResume[3].method, GatewayMethod.sessionResume)
+        await socket.respondError(to: secondResume[3], error: JSONRPCError(code: 4007, message: "session not found"))
+        let secondCreate = await socket.waitForRequests(count: 5)
+        XCTAssertEqual(secondCreate[4].method, GatewayMethod.sessionCreate)
         await socket.respond(
-            to: secondCreate[3],
+            to: secondCreate[4],
             result: activeSessionResult(runtimeID: "runtime-replacement", storedID: "stored-replacement")
         )
         let replacement = try await missing.value
@@ -278,6 +281,16 @@ private actor RecoverySocket: GatewaySocket {
 
     func respond(to request: JSONRPCRequest, result: JSONValue) {
         let data = try! JSONEncoder().encode(JSONRPCResponse(id: request.id, result: result))
+        if let continuation = incomingWaiters.first {
+            incomingWaiters.removeFirst()
+            continuation.resume(returning: data)
+        } else {
+            incoming.append(data)
+        }
+    }
+
+    func respondError(to request: JSONRPCRequest, error: JSONRPCError) {
+        let data = try! JSONEncoder().encode(JSONRPCResponse(id: request.id, error: error))
         if let continuation = incomingWaiters.first {
             incomingWaiters.removeFirst()
             continuation.resume(returning: data)

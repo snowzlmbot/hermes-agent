@@ -189,7 +189,7 @@ public final class AppModel {
 
     public func createSession() async {
         guard let chatModel else { return }
-        let generation = beginSessionSelectionOperation()
+        let generation = await beginSessionSelectionOperation()
         do {
             let active = try await chatModel.createSession(profileID: profile?.id ?? "default")
             guard isCurrentSessionSelectionOperation(generation) else { return }
@@ -225,7 +225,7 @@ public final class AppModel {
 
     public func selectSession(_ storedID: String) async {
         guard let chatModel else { return }
-        let generation = beginSessionSelectionOperation()
+        let generation = await beginSessionSelectionOperation()
         if chatModel.state.storedSessionID == storedID {
             guard isCurrentSessionSelectionOperation(generation) else { return }
             await commitSelectedSessionID(storedID)
@@ -261,7 +261,7 @@ public final class AppModel {
                 if let nextStoredID = chatModel.sessions.first?.storedID {
                     await selectSession(nextStoredID)
                 } else {
-                    _ = beginSessionSelectionOperation()
+                    _ = await beginSessionSelectionOperation()
                     await commitSelectedSessionID(nil)
                 }
             }
@@ -287,7 +287,7 @@ public final class AppModel {
                 if let nextStoredID = chatModel.sessions.first?.storedID {
                     await selectSession(nextStoredID)
                 } else {
-                    _ = beginSessionSelectionOperation()
+                    _ = await beginSessionSelectionOperation()
                     await commitSelectedSessionID(nil)
                 }
             }
@@ -324,8 +324,12 @@ public final class AppModel {
         hasSceneRecoveryError = false
     }
 
-    private func beginSessionSelectionOperation() -> UInt {
-        invalidateSceneRecovery()
+    private func beginSessionSelectionOperation() async -> UInt {
+        sceneRecoveryGeneration &+= 1
+        let recoveryTask = sceneRecoveryTask
+        recoveryTask?.cancel()
+        sceneRecoveryTask = nil
+        await recoveryTask?.value
         sessionSelectionGeneration &+= 1
         return sessionSelectionGeneration
     }
@@ -334,7 +338,12 @@ public final class AppModel {
         generation == sessionSelectionGeneration
     }
 
-    private func commitSelectedSessionID(_ storedSessionID: String?) async {
+    private func commitSelectedSessionID(
+        _ storedSessionID: String?,
+        expectedGeneration: UInt? = nil
+    ) async {
+        if let expectedGeneration,
+           !isCurrentSessionSelectionOperation(expectedGeneration) { return }
         selectedSessionID = storedSessionID
         guard let profile else { return }
         await dependencies.profileRepository.saveStoredSessionID(
@@ -484,6 +493,10 @@ public final class AppModel {
             case .inputRequired(let sessionID):
                 guard !self.isSceneActive, let sessionID else { return }
                 Task { await self.dependencies.notificationService.scheduleInput(sessionID: sessionID) }
+            case .sessionSelectionChanged(let storedID):
+                guard self.chatModel === chatModel else { return }
+                let generation = self.sessionSelectionGeneration
+                Task { await self.commitSelectedSessionID(storedID, expectedGeneration: generation) }
             case .sessionsChanged:
                 Task {
                     do {

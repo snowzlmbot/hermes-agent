@@ -121,6 +121,7 @@ public actor HermesGatewayTransport {
 
         do {
             let dialAuth = try await attempt.task.value
+            try Task.checkCancellation()
             if socket != nil { return }
             guard connectionAttempt?.id == attempt.id, !intentionallyDisconnected else {
                 throw CancellationError()
@@ -200,16 +201,24 @@ public actor HermesGatewayTransport {
             reconnectAttempt = attempt
         }
 
-        do {
-            try await attempt.task.value
-            if reconnectAttempt?.id == attempt.id {
-                reconnectAttempt = nil
+        let attemptID = attempt.id
+        try await withTaskCancellationHandler {
+            do {
+                try await attempt.task.value
+                try Task.checkCancellation()
+                if reconnectAttempt?.id == attemptID {
+                    reconnectAttempt = nil
+                }
+            } catch {
+                if error is CancellationError || Task.isCancelled {
+                    await cancelReconnect(attemptID: attemptID)
+                } else if reconnectAttempt?.id == attemptID {
+                    reconnectAttempt = nil
+                }
+                throw error
             }
-        } catch {
-            if reconnectAttempt?.id == attempt.id {
-                reconnectAttempt = nil
-            }
-            throw error
+        } onCancel: {
+            attempt.task.cancel()
         }
     }
 
@@ -268,10 +277,30 @@ public actor HermesGatewayTransport {
             if generation == connectionGeneration, !intentionallyDisconnected {
                 self.socket = nil
                 receiver = nil
+                events.removeAll()
                 failPending(with: GatewayTransportError.connectionLost)
+                finishEventWaiters()
                 await hooks.onDisconnected(String(describing: error))
             }
         }
+    }
+
+    private func cancelReconnect(attemptID: Int) async {
+        guard reconnectAttempt?.id == attemptID else { return }
+        intentionallyDisconnected = true
+        reconnectAttempt?.task.cancel()
+        reconnectAttempt = nil
+        connectionAttempt?.task.cancel()
+        connectionAttempt = nil
+        connectionGeneration += 1
+        receiver?.cancel()
+        receiver = nil
+        let current = socket
+        socket = nil
+        events.removeAll()
+        await current?.cancel()
+        failPending(with: GatewayTransportError.connectionLost)
+        finishEventWaiters()
     }
 
     private func handle(_ frame: JSONRPCInboundFrame) {
