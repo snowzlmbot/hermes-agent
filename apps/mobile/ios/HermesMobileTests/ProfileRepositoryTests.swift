@@ -23,18 +23,48 @@ final class ProfileRepositoryTests: XCTestCase {
     func testClearingRepositoryRemovesMetadataAndCredential() async throws {
         let profiles = InMemoryGatewayProfileStore()
         let credentials = InMemoryCredentialStore()
-        let repository = GatewayProfileRepository(profileStore: profiles, credentialStore: credentials)
+        let selections = InMemoryStoredSessionSelectionStore()
+        let repository = GatewayProfileRepository(
+            profileStore: profiles,
+            credentialStore: credentials,
+            sessionSelectionStore: selections
+        )
         let profile = GatewayProfile(id: "default", name: "Primary", endpoint: "https://gateway.example.com", authMode: .token)
 
         try await repository.save(profile: profile, credentials: GatewayCredentials(token: "secret"))
+        await repository.saveStoredSessionID("stored-session", profileID: profile.id)
         try await repository.clear()
 
         let connection = try await repository.load()
         let storedProfiles = try await profiles.load()
         let storedCredentials = try await credentials.load()
+        let storedSessionID = await repository.loadStoredSessionID(profileID: profile.id)
         XCTAssertNil(connection)
         XCTAssertTrue(storedProfiles.isEmpty)
         XCTAssertNil(storedCredentials)
+        XCTAssertNil(storedSessionID)
+    }
+
+    func testSessionSelectionStorePersistsOnlyStoredIdentifierByProfile() async {
+        let suiteName = "ProfileRepositoryTests.\(UUID().uuidString)"
+        let storageKey = "session-selection"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = UserDefaultsStoredSessionSelectionStore(
+            suiteName: suiteName,
+            storageKey: storageKey
+        )
+
+        await store.save("stored-only", profileID: "profile-a")
+        let profileASelection = await store.load(profileID: "profile-a")
+        let profileBSelection = await store.load(profileID: "profile-b")
+
+        XCTAssertEqual(profileASelection, "stored-only")
+        XCTAssertNil(profileBSelection)
+        XCTAssertEqual(
+            defaults.dictionary(forKey: storageKey) as? [String: String],
+            ["profile-a": "stored-only"]
+        )
     }
 
     @MainActor

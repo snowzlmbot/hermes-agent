@@ -25,7 +25,8 @@ public struct AppDependencies: Sendable {
         AppDependencies(
             profileRepository: GatewayProfileRepository(
                 profileStore: UserDefaultsGatewayProfileStore(),
-                credentialStore: KeychainCredentialStore()
+                credentialStore: KeychainCredentialStore(),
+                sessionSelectionStore: UserDefaultsStoredSessionSelectionStore()
             ),
             notificationService: LocalNotificationService(),
             attachmentImporter: AttachmentImportService()

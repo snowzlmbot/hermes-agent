@@ -28,7 +28,9 @@ public final class ChatModel {
     @ObservationIgnored private let archiveStore: (any SessionArchiveStore)?
     @ObservationIgnored private let sessionMutationClient: (any SessionMutationClient)?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
+    @ObservationIgnored private var connectionOperationGeneration: UInt = 0
     @ObservationIgnored private var sessionOperationGeneration: UInt = 0
+    @ObservationIgnored private var sessionListOperationGeneration: UInt = 0
     @ObservationIgnored private var modelControlOperationGeneration: UInt = 0
 
     public init(
@@ -56,17 +58,22 @@ public final class ChatModel {
 
 
     public func connect() async throws {
+        let generation = beginConnectionOperation()
         try await transport.connect()
+        guard isCurrentConnectionOperation(generation) else { return }
         isConnected = true
         startEventLoop()
     }
 
     public func disconnect() async {
+        connectionOperationGeneration &+= 1
         sessionOperationGeneration &+= 1
+        sessionListOperationGeneration &+= 1
         eventTask?.cancel()
         eventTask = nil
         await transport.disconnect()
         isConnected = false
+        isLoadingSessions = false
     }
 
     public func setRuntimeSession(runtimeID: String, storedID: String) {
@@ -79,6 +86,15 @@ public final class ChatModel {
         resetModelControlState()
     }
 
+    private func beginConnectionOperation() -> UInt {
+        connectionOperationGeneration &+= 1
+        return connectionOperationGeneration
+    }
+
+    private func isCurrentConnectionOperation(_ generation: UInt) -> Bool {
+        generation == connectionOperationGeneration
+    }
+
     private func beginSessionOperation() -> UInt {
         sessionOperationGeneration &+= 1
         return sessionOperationGeneration
@@ -88,9 +104,119 @@ public final class ChatModel {
         generation == sessionOperationGeneration
     }
 
-    public func loadSessions(includeArchived: Bool = false) async throws {
+    private func beginSessionListOperation() -> UInt {
+        sessionListOperationGeneration &+= 1
         isLoadingSessions = true
-        defer { isLoadingSessions = false }
+        return sessionListOperationGeneration
+    }
+
+    private func isCurrentSessionListOperation(_ generation: UInt) -> Bool {
+        generation == sessionListOperationGeneration
+    }
+
+    public func loadSessions(includeArchived: Bool = false) async throws {
+        let listGeneration = beginSessionListOperation()
+        let sessionGeneration = sessionOperationGeneration
+        defer {
+            if isCurrentSessionListOperation(listGeneration) {
+                isLoadingSessions = false
+            }
+        }
+        let parsed = try await fetchSessions(includeArchived: includeArchived)
+        guard isCurrentSessionListOperation(listGeneration),
+              isCurrentSessionOperation(sessionGeneration) else { return }
+        applySessions(parsed)
+    }
+
+    @discardableResult
+    public func restoreSession(
+        storedSessionID: String?,
+        profileID: String = "default"
+    ) async throws -> ActiveSession {
+        let sessionGeneration = beginSessionOperation()
+        return try await restoreSession(
+            storedSessionID: storedSessionID,
+            profileID: profileID,
+            sessionGeneration: sessionGeneration,
+            connectionGeneration: nil
+        )
+    }
+
+    @discardableResult
+    public func reconnectAndRestore(
+        storedSessionID: String?,
+        profileID: String = "default"
+    ) async throws -> ActiveSession {
+        let connectionGeneration = beginConnectionOperation()
+        let sessionGeneration = beginSessionOperation()
+        do {
+            try await transport.reconnect()
+        } catch {
+            if isCurrentConnectionOperation(connectionGeneration) {
+                isConnected = false
+            }
+            throw error
+        }
+        try Task.checkCancellation()
+        guard isCurrentConnectionOperation(connectionGeneration),
+              isCurrentSessionOperation(sessionGeneration) else {
+            throw CancellationError()
+        }
+        isConnected = true
+        startEventLoop()
+        return try await restoreSession(
+            storedSessionID: storedSessionID,
+            profileID: profileID,
+            sessionGeneration: sessionGeneration,
+            connectionGeneration: connectionGeneration
+        )
+    }
+
+    private func restoreSession(
+        storedSessionID: String?,
+        profileID: String,
+        sessionGeneration: UInt,
+        connectionGeneration: UInt?
+    ) async throws -> ActiveSession {
+        let listGeneration = beginSessionListOperation()
+        defer {
+            if isCurrentSessionListOperation(listGeneration) {
+                isLoadingSessions = false
+            }
+        }
+        let parsed = try await fetchSessions(includeArchived: false)
+        try Task.checkCancellation()
+        guard isCurrentSessionListOperation(listGeneration),
+              isCurrentSessionOperation(sessionGeneration),
+              connectionGeneration.map(isCurrentConnectionOperation) ?? true else {
+            throw CancellationError()
+        }
+        applySessions(parsed)
+
+        if let storedSessionID,
+           parsed.contains(where: { $0.storedID == storedSessionID }) {
+            do {
+                let active = try await requestResume(
+                    storedSessionID: storedSessionID,
+                    profileID: profileID,
+                    generation: sessionGeneration
+                )
+                guard isCurrentSessionOperation(sessionGeneration) else {
+                    throw CancellationError()
+                }
+                return active
+            } catch GatewayTransportError.rpc(let error) where error.code == 4007 {
+                // The persisted session was deleted remotely after it was listed.
+            }
+        }
+        let active = try await requestCreate(profileID: profileID, generation: sessionGeneration)
+        guard isCurrentSessionOperation(sessionGeneration) else {
+            throw CancellationError()
+        }
+        return active
+    }
+
+    private func fetchSessions(includeArchived: Bool) async throws -> [SessionSummary] {
         let result = try await transport.request(
             GatewayMethod.sessionList,
             params: [
@@ -111,6 +237,10 @@ public final class ChatModel {
             }
             parsed = visible
         }
+        return parsed
+    }
+
+    private func applySessions(_ parsed: [SessionSummary]) {
         sessions = parsed
         sortSessionsForDisplay()
     }
@@ -118,6 +248,10 @@ public final class ChatModel {
     @discardableResult
     public func createSession(profileID: String = "default") async throws -> ActiveSession {
         let generation = beginSessionOperation()
+        return try await requestCreate(profileID: profileID, generation: generation)
+    }
+
+    private func requestCreate(profileID: String, generation: UInt) async throws -> ActiveSession {
         let result = try await transport.request(
             GatewayMethod.sessionCreate,
             params: [
@@ -138,6 +272,18 @@ public final class ChatModel {
     @discardableResult
     public func resume(storedSessionID: String, profileID: String = "default") async throws -> ActiveSession {
         let generation = beginSessionOperation()
+        return try await requestResume(
+            storedSessionID: storedSessionID,
+            profileID: profileID,
+            generation: generation
+        )
+    }
+
+    private func requestResume(
+        storedSessionID: String,
+        profileID: String,
+        generation: UInt
+    ) async throws -> ActiveSession {
         let result = try await transport.request(
             GatewayMethod.sessionResume,
             params: [
@@ -498,7 +644,7 @@ public final class ChatModel {
     }
 
     private func startEventLoop() {
-        guard eventTask == nil else { return }
+        eventTask?.cancel()
         eventTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled, let event = await transport.nextEvent() {

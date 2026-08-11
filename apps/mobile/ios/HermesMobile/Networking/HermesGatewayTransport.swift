@@ -71,10 +71,17 @@ public actor HermesGatewayTransport {
         let task: Task<GatewayAuth, Error>
     }
 
+    private struct ReconnectAttempt {
+        let id: Int
+        let task: Task<Void, Error>
+    }
+
     private var socket: (any GatewaySocket)?
     private var receiver: Task<Void, Never>?
     private var connectionAttempt: ConnectionAttempt?
+    private var reconnectAttempt: ReconnectAttempt?
     private var connectionAttemptSequence = 0
+    private var reconnectAttemptSequence = 0
     private var connectionGeneration = 0
     private var requestSequence = 0
     private var pending: [JSONRPCID: CheckedContinuation<JSONValue, Error>] = [:]
@@ -138,6 +145,8 @@ public actor HermesGatewayTransport {
     public func disconnect() async {
         intentionallyDisconnected = true
         connectionGeneration += 1
+        reconnectAttempt?.task.cancel()
+        reconnectAttempt = nil
         connectionAttempt?.task.cancel()
         connectionAttempt = nil
         receiver?.cancel()
@@ -176,26 +185,61 @@ public actor HermesGatewayTransport {
     }
 
     public func reconnect(maxAttempts: Int = 5) async throws {
-        let attempts = max(1, maxAttempts)
+        let attempt: ReconnectAttempt
+        if let current = reconnectAttempt {
+            attempt = current
+        } else {
+            reconnectAttemptSequence += 1
+            let id = reconnectAttemptSequence
+            let attempts = max(1, maxAttempts)
+            let task = Task { [weak self] in
+                guard let self else { throw CancellationError() }
+                try await self.performReconnect(maxAttempts: attempts)
+            }
+            attempt = ReconnectAttempt(id: id, task: task)
+            reconnectAttempt = attempt
+        }
+
+        do {
+            try await attempt.task.value
+            if reconnectAttempt?.id == attempt.id {
+                reconnectAttempt = nil
+            }
+        } catch {
+            if reconnectAttempt?.id == attempt.id {
+                reconnectAttempt = nil
+            }
+            throw error
+        }
+    }
+
+    private func performReconnect(maxAttempts: Int) async throws {
+        connectionGeneration += 1
         connectionAttempt?.task.cancel()
         connectionAttempt = nil
         receiver?.cancel()
         receiver = nil
         let oldSocket = socket
         socket = nil
+        events.removeAll()
         await oldSocket?.cancel()
         failPending(with: GatewayTransportError.connectionLost)
+        finishEventWaiters()
 
-        for attempt in 1...attempts {
+        for attempt in 1...maxAttempts {
+            try Task.checkCancellation()
             await hooks.onReconnectAttempt(attempt)
             if attempt > 1 {
                 let delay = min(pow(2.0, Double(attempt - 2)), 8.0)
                 try await Task.sleep(for: .seconds(delay))
             }
             do {
+                try Task.checkCancellation()
                 try await connect()
                 return
-            } catch where attempt < attempts {
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch where attempt < maxAttempts {
                 continue
             } catch {
                 throw error
