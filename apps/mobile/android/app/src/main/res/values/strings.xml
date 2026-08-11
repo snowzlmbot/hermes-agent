@@ -11,4 +11,12 @@
   <string name="model_confirmation_title">Confirm model switch</string>
   <string name="action_confirm">Confirm</string>
   <string name="action_cancel">Cancel</string>
+  <string name="connection_guidance">Use a secure gateway address, then sign in with OAuth or enter a session token. Credentials are kept in encrypted storage.</string>
+  <string name="oauth_sign_in_title">OAuth sign-in</string>
+  <string name="oauth_sign_in_guidance">Check which browser-based sign-in providers this gateway supports.</string>
+  <string name="oauth_check_options">Check sign-in options</string>
+  <string name="oauth_checking">Checking sign-in options…</string>
+  <string name="oauth_sign_in_with">Sign in with %1$s</string>
+  <string name="oauth_pending">Finish sign-in in your browser, then return to Hermes.</string>
+  <string name="oauth_cancel">Cancel sign-in</string>
 </resources>

@@ -7,6 +7,10 @@ import com.snowzlmbot.hermes.mobile.core.GatewayProfile
 import com.snowzlmbot.hermes.mobile.core.GatewayProfileRepository
 import com.snowzlmbot.hermes.mobile.core.GatewayRestClient
 import com.snowzlmbot.hermes.mobile.core.GatewaySocketClient
+import com.snowzlmbot.hermes.mobile.core.NativeOAuthDiscovery
+import com.snowzlmbot.hermes.mobile.core.NativeOAuthLogin
+import com.snowzlmbot.hermes.mobile.core.OAuthTokenSet
+import com.snowzlmbot.hermes.mobile.core.PendingNativeOAuth
 import com.snowzlmbot.hermes.mobile.core.RestCredential
 import com.snowzlmbot.hermes.mobile.core.SecretValue
 import com.snowzlmbot.hermes.mobile.core.StoredGatewayAuth
@@ -17,6 +21,7 @@ import kotlinx.coroutines.sync.withLock
 
 internal class AppGraph(
   private val connections: GatewayProfileRepository,
+  private val nativeOAuthLogin: NativeOAuthLogin = NativeOAuthLogin(),
   private val authCoordinatorFactory: (
     GatewayConnection,
     GatewayProfileRepository,
@@ -29,33 +34,57 @@ internal class AppGraph(
 
   suspend fun restoreConnection(): GatewayConnection? = connections.load()
 
+  suspend fun discoverNativeOAuth(address: String): NativeOAuthDiscovery =
+    nativeOAuthLogin.discover(address)
+
+  fun beginNativeOAuth(
+    discovery: NativeOAuthDiscovery,
+    provider: String,
+  ): PendingNativeOAuth = nativeOAuthLogin.begin(discovery, provider)
+
+  suspend fun completeNativeOAuth(
+    pending: PendingNativeOAuth,
+    callback: java.net.URI,
+  ): OAuthTokenSet = nativeOAuthLogin.complete(pending, callback)
+
   suspend fun saveConnection(profile: GatewayProfile, secret: SecretValue) {
-    invalidateActiveCoordinator()
-    connections.save(profile, secret)
+    authCoordinatorMutex.withLock {
+      activeAuthCoordinator?.invalidate()
+      activeAuthCoordinator = null
+      connections.save(profile, secret)
+    }
   }
 
   suspend fun saveConnection(profile: GatewayProfile, auth: StoredGatewayAuth) {
-    invalidateActiveCoordinator()
-    connections.save(profile, auth)
+    authCoordinatorMutex.withLock {
+      activeAuthCoordinator?.invalidate()
+      activeAuthCoordinator = null
+      connections.save(profile, auth)
+    }
   }
 
   suspend fun clearConnection() {
-    val coordinator = authCoordinatorMutex.withLock {
-      activeAuthCoordinator.also { activeAuthCoordinator = null }
-    }
-    if (coordinator != null) {
-      coordinator.logout()
-    } else {
-      connections.clear()
+    authCoordinatorMutex.withLock {
+      val coordinator = activeAuthCoordinator
+      activeAuthCoordinator = null
+      if (coordinator != null) {
+        coordinator.logout()
+      } else {
+        connections.clear()
+      }
     }
   }
 
-  suspend fun runtime(connection: GatewayConnection): HermesMobileRuntime {
+  suspend fun runtime(connection: GatewayConnection): HermesMobileRuntime = authCoordinatorMutex.withLock {
+    if (connections.load() != connection) {
+      throw IllegalStateException("Gateway connection is no longer current")
+    }
     val endpoint = connection.endpoint()
+    activeAuthCoordinator?.invalidate()
     if (connection.profile.authMode == GatewayAuthMode.OAUTH) {
       val auth = authCoordinatorFactory(connection, connections)
-      replaceActiveCoordinator(auth)
-      return HermesMobileRuntime(
+      activeAuthCoordinator = auth
+      return@withLock HermesMobileRuntime(
         rpc = GatewaySocketClient(
           endpoint = endpoint,
           credentialProvider = auth::socketCredential,
@@ -63,7 +92,7 @@ internal class AppGraph(
         sessions = RestMobileSessionSource(auth.restClient()),
       )
     }
-    replaceActiveCoordinator(null)
+    activeAuthCoordinator = null
     val restCredential = when (connection.profile.authMode) {
       GatewayAuthMode.TOKEN -> RestCredential.StaticToken(connection.secret)
       GatewayAuthMode.TICKET -> null
@@ -74,17 +103,6 @@ internal class AppGraph(
       endpoint = endpoint,
       credentialProvider = { connection.credential() },
     )
-    return HermesMobileRuntime(socket, RestMobileSessionSource(rest))
-  }
-
-  private suspend fun replaceActiveCoordinator(next: GatewayAuthCoordinator?) {
-    val previous = authCoordinatorMutex.withLock {
-      activeAuthCoordinator.also { activeAuthCoordinator = next }
-    }
-    if (previous !== next) previous?.invalidate()
-  }
-
-  private suspend fun invalidateActiveCoordinator() {
-    replaceActiveCoordinator(null)
+    HermesMobileRuntime(socket, RestMobileSessionSource(rest))
   }
 }
