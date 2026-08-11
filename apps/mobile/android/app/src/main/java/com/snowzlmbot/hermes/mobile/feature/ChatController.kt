@@ -2,6 +2,9 @@ package com.snowzlmbot.hermes.mobile.feature
 
 import com.snowzlmbot.hermes.mobile.core.ActiveSession
 import com.snowzlmbot.hermes.mobile.core.GatewayEvent
+import com.snowzlmbot.hermes.mobile.core.GatewayEventType
+import com.snowzlmbot.hermes.mobile.platform.ChatNotificationSignal
+import com.snowzlmbot.hermes.mobile.platform.NotificationKind
 import com.snowzlmbot.hermes.mobile.core.GatewayRpcException
 import com.snowzlmbot.hermes.mobile.core.ModelCatalog
 import com.snowzlmbot.hermes.mobile.core.ModelOption
@@ -116,6 +119,7 @@ internal class ChatController(
   private val runtime: MobileGatewayRuntime,
   scope: CoroutineScope,
   private val selectionStore: StoredSessionSelectionStore = EmptyStoredSessionSelectionStore,
+  private val onNotification: (ChatNotificationSignal) -> Unit = {},
 ) {
   private val mutableState = MutableStateFlow(MobileChatUiState())
   private val sessionOperationGeneration = AtomicLong(0)
@@ -123,6 +127,7 @@ internal class ChatController(
   private val eventJob: Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
     runtime.events.collect { event ->
       val current = mutableState.value
+      val notification = notificationSignal(event, current.chat)
       val chat = ChatReducer.reduce(current.chat, event)
       val modelChanged = chat.model != current.chat.model || chat.provider != current.chat.provider
       val modelControlChanged = modelChanged || chat.reasoningEffort != current.chat.reasoningEffort
@@ -137,6 +142,7 @@ internal class ChatController(
         isLoadingModelOptions = if (modelControlChanged) false else current.isLoadingModelOptions,
         pendingModelConfirmation = if (modelChanged) null else current.pendingModelConfirmation,
       )
+      notification?.let(onNotification)
     }
   }
 
@@ -421,6 +427,16 @@ internal class ChatController(
     runtime.close()
   }
 
+  private fun notificationSignal(event: GatewayEvent, state: ChatState): ChatNotificationSignal? {
+    val runtimeId = state.runtimeSessionId ?: return null
+    val storedId = state.storedSessionId
+      ?.takeIf { it.isNotBlank() && it == it.trim() }
+      ?: return null
+    if (event.runtimeSessionId != runtimeId) return null
+    val kind = notificationKind(event.type) ?: return null
+    return ChatNotificationSignal(kind, storedId)
+  }
+
   private suspend fun runOperation(operation: suspend () -> Unit) {
     try {
       operation()
@@ -428,6 +444,13 @@ internal class ChatController(
     } catch (error: Throwable) {
       mutableState.value = mutableState.value.copy(error = error.toUiError())
     }
+  }
+
+  private fun notificationKind(type: GatewayEventType): NotificationKind? = when (type) {
+    GatewayEventType.MESSAGE_COMPLETE -> NotificationKind.COMPLETION
+    GatewayEventType.APPROVAL_REQUEST -> NotificationKind.APPROVAL
+    GatewayEventType.CLARIFY_REQUEST, GatewayEventType.SECRET_REQUEST, GatewayEventType.SUDO_REQUEST -> NotificationKind.INPUT
+    else -> null
   }
 
   private fun isCurrentModelControlOperation(generation: Long, runtimeId: String): Boolean =

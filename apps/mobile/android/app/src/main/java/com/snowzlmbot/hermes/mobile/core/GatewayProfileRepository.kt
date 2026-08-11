@@ -10,7 +10,11 @@ data class GatewayProfile(
   val address: String,
   val authMode: GatewayAuthMode,
   val allowInsecure: Boolean,
-)
+  val id: String = "default",
+) {
+  val sessionSelectionScope: String
+    get() = "$id|${GatewayEndpoint.parse(address, allowInsecure).httpBaseUrl}"
+}
 
 sealed interface StoredGatewayAuth {
   data class StaticToken(val token: SecretValue) : StoredGatewayAuth {

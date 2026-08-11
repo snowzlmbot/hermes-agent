@@ -9,6 +9,13 @@ import org.junit.Test
 
 class GatewayProfileRepositoryTest {
   @Test
+  fun sessionSelectionScopeIncludesProfileIdentity() {
+    val first = GatewayProfile("gateway.example", GatewayAuthMode.TOKEN, false, id = "profile-a")
+    val otherProfile = first.copy(id = "profile-b")
+    assertFalse(first.sessionSelectionScope == otherProfile.sessionSelectionScope)
+  }
+
+  @Test
   fun savesConnectionMetadataSeparatelyFromCredential() = runTest {
     val profiles = FakeProfileStore()
     val credentials = FakeCredentialStore()
