@@ -265,14 +265,16 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(model.selectedSessionID, "stored-notification")
         XCTAssertEqual(model.chatModel?.state.storedSessionID, "stored-notification")
         XCTAssertEqual(model.pendingNotificationRouteCount, 0)
-        XCTAssertEqual((await socket.requestsSnapshot()).count, 3)
+        let routedRequestCount = await socket.requestsSnapshot().count
+        XCTAssertEqual(routedRequestCount, 3)
 
         await model.handleNotificationRoute(NotificationRoute(
             storedSessionID: "stored-wrong-gateway",
             profileScope: String(repeating: "b", count: 64)
         ))
         XCTAssertEqual(model.selectedSessionID, "stored-notification")
-        XCTAssertEqual((await socket.requestsSnapshot()).count, 3)
+        let finalRequestCount = await socket.requestsSnapshot().count
+        XCTAssertEqual(finalRequestCount, 3)
     }
 
     @MainActor
