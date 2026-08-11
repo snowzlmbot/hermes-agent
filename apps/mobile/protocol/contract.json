@@ -75,6 +75,19 @@
     "missing_stored_session_error_code": 4007,
     "missing_stored_session_client_action": "clear_selection_and_create"
   },
+  "notification_routing": {
+    "identity_field": "stored_session_id",
+    "profile_scoped": true,
+    "single_consume": true,
+    "forbidden_fields": [
+      "session_id",
+      "token",
+      "ticket",
+      "content",
+      "prompt",
+      "approval"
+    ]
+  },
   "attachments": {
     "image.attach_bytes": {
       "bytes_field": "content_base64",

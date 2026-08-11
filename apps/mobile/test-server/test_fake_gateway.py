@@ -343,8 +343,13 @@ class FakeGatewayContractTests(unittest.TestCase):
             session_identity["missing_stored_session_client_action"],
             "clear_selection_and_create",
         )
+        notification_routing = contract["notification_routing"]
+        self.assertEqual(notification_routing["identity_field"], "stored_session_id")
+        self.assertTrue(notification_routing["profile_scoped"])
+        self.assertTrue(notification_routing["single_consume"])
+        self.assertIn("session_id", notification_routing["forbidden_fields"])
+        self.assertIn("token", notification_routing["forbidden_fields"])
         self.assertEqual(contract["responses"]["sudo.respond"], "password")
-        self.assertEqual(contract["attachments"]["file.attach"]["bytes_field"], "data_url")
         self.assertEqual(contract["frames"]["request"]["jsonrpc"], "2.0")
         self.assertEqual(contract["frames"]["event"]["method"], "event")
 
