@@ -93,6 +93,46 @@
       "approval"
     ]
   },
+  "event_replay_protection": {
+    "dedup_key_fields": ["stored_session_id", "event_type", "stable_identity"],
+    "capacity": 1024,
+    "payload_stable_identity_fields": ["event_id", "sequence"],
+    "single_occurrence_identity_fields": {
+      "message.start": ["message_id"],
+      "message.complete": ["message_id"],
+      "tool.start": ["tool_id", "tool_call_id"],
+      "tool.complete": ["tool_id", "tool_call_id"],
+      "approval.request": ["request_id", "id"],
+      "clarify.request": ["request_id", "id"],
+      "clarify.expire": ["request_id", "id"],
+      "secret.request": ["request_id", "id"],
+      "secret.expire": ["request_id", "id"],
+      "sudo.request": ["request_id", "id"],
+      "sudo.expire": ["request_id", "id"]
+    },
+    "streaming_event_types": [
+      "message.delta",
+      "reasoning.delta",
+      "thinking.delta",
+      "tool.progress"
+    ],
+    "missing_stable_identity_action": "process",
+    "duplicate_action": "discard_before_reducer_and_signal",
+    "same_profile_reconnect_action": "retain",
+    "profile_change_action": "clear",
+    "forbidden_identity_fields": [
+      "text",
+      "content",
+      "prompt",
+      "command",
+      "args",
+      "result",
+      "token",
+      "ticket",
+      "secret",
+      "password"
+    ]
+  },
   "attachments": {
     "image.attach_bytes": {
       "bytes_field": "content_base64",

@@ -361,6 +361,39 @@ class FakeGatewayContractTests(unittest.TestCase):
         self.assertIn("content", notification_routing["forbidden_fields"])
         self.assertIn("prompt", notification_routing["forbidden_fields"])
         self.assertIn("approval", notification_routing["forbidden_fields"])
+        event_replay = contract["event_replay_protection"]
+        self.assertEqual(
+            event_replay["dedup_key_fields"],
+            ["stored_session_id", "event_type", "stable_identity"],
+        )
+        self.assertEqual(event_replay["capacity"], 1024)
+        self.assertEqual(event_replay["payload_stable_identity_fields"], ["event_id", "sequence"])
+        self.assertEqual(event_replay["missing_stable_identity_action"], "process")
+        self.assertEqual(
+            event_replay["duplicate_action"],
+            "discard_before_reducer_and_signal",
+        )
+        self.assertEqual(event_replay["same_profile_reconnect_action"], "retain")
+        self.assertEqual(event_replay["profile_change_action"], "clear")
+        self.assertIn("message.delta", event_replay["streaming_event_types"])
+        self.assertIn("tool.progress", event_replay["streaming_event_types"])
+        self.assertEqual(
+            event_replay["single_occurrence_identity_fields"]["tool.complete"],
+            ["tool_id", "tool_call_id"],
+        )
+        for forbidden in (
+            "text",
+            "content",
+            "prompt",
+            "command",
+            "args",
+            "result",
+            "token",
+            "ticket",
+            "secret",
+            "password",
+        ):
+            self.assertIn(forbidden, event_replay["forbidden_identity_fields"])
         self.assertEqual(contract["responses"]["sudo.respond"], "password")
         self.assertEqual(contract["attachments"]["file.attach"]["bytes_field"], "data_url")
         self.assertEqual(contract["frames"]["request"]["jsonrpc"], "2.0")
