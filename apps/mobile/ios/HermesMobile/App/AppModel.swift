@@ -19,12 +19,16 @@ public final class AppModel {
     public private(set) var oauthProviders: [NativeOAuthProvider] = []
     public private(set) var isConnecting = false
     public private(set) var isSceneActive = true
-    public var selectedSessionID: String?
+    public private(set) var selectedSessionID: String?
     public var errorMessage: String?
 
     @ObservationIgnored private let dependencies: AppDependencies
     @ObservationIgnored private let backgroundActivity = BackgroundActivityService()
     @ObservationIgnored private let nativeAuthenticationSession = NativeAuthenticationSession()
+    @ObservationIgnored private var sceneRecoveryTask: Task<Void, Never>?
+    @ObservationIgnored private var sceneRecoveryGeneration: UInt = 0
+    @ObservationIgnored private var sessionSelectionGeneration: UInt = 0
+    @ObservationIgnored private var hasSceneRecoveryError = false
 
     public init(dependencies: AppDependencies = .live) {
         self.dependencies = dependencies
@@ -150,6 +154,7 @@ public final class AppModel {
     }
 
     public func disconnectAndForget() async {
+        invalidateSceneRecovery()
         await chatModel?.disconnect()
         await gatewayRESTClient?.invalidate()
         do {
@@ -162,21 +167,35 @@ public final class AppModel {
         chatModel = nil
         gatewayRESTClient = nil
         selectedSessionID = nil
+        sessionSelectionGeneration &+= 1
         oauthCapability = nil
         oauthProviders = []
         phase = .onboarding
     }
 
     public func setSceneActive(_ active: Bool) {
+        guard active != isSceneActive else { return }
         isSceneActive = active
+        if active {
+            scheduleSceneRecovery()
+        } else {
+            invalidateSceneRecovery()
+        }
+    }
+
+    func waitForSceneRecovery() async {
+        await sceneRecoveryTask?.value
     }
 
     public func createSession() async {
         guard let chatModel else { return }
+        let generation = beginSessionSelectionOperation()
         do {
             let active = try await chatModel.createSession(profileID: profile?.id ?? "default")
-            selectedSessionID = active.storedID
+            guard isCurrentSessionSelectionOperation(generation) else { return }
+            await commitSelectedSessionID(active.storedID)
         } catch {
+            guard isCurrentSessionSelectionOperation(generation) else { return }
             errorMessage = String(localized: "error.session.create")
         }
     }
@@ -206,11 +225,21 @@ public final class AppModel {
 
     public func selectSession(_ storedID: String) async {
         guard let chatModel else { return }
-        selectedSessionID = storedID
-        if chatModel.state.storedSessionID == storedID { return }
+        let generation = beginSessionSelectionOperation()
+        if chatModel.state.storedSessionID == storedID {
+            guard isCurrentSessionSelectionOperation(generation) else { return }
+            await commitSelectedSessionID(storedID)
+            return
+        }
         do {
-            _ = try await chatModel.resume(storedSessionID: storedID, profileID: profile?.id ?? "default")
+            let active = try await chatModel.resume(
+                storedSessionID: storedID,
+                profileID: profile?.id ?? "default"
+            )
+            guard isCurrentSessionSelectionOperation(generation) else { return }
+            await commitSelectedSessionID(active.storedID)
         } catch {
+            guard isCurrentSessionSelectionOperation(generation) else { return }
             errorMessage = String(localized: "error.session.resume")
         }
     }
@@ -229,8 +258,12 @@ public final class AppModel {
         do {
             try await chatModel.setArchived(true, storedSessionID: storedID)
             if selectedSessionID == storedID {
-                selectedSessionID = chatModel.sessions.first?.storedID
-                if let selectedSessionID { await selectSession(selectedSessionID) }
+                if let nextStoredID = chatModel.sessions.first?.storedID {
+                    await selectSession(nextStoredID)
+                } else {
+                    _ = beginSessionSelectionOperation()
+                    await commitSelectedSessionID(nil)
+                }
             }
         } catch {
             errorMessage = String(localized: "error.session.archive")
@@ -251,8 +284,12 @@ public final class AppModel {
         do {
             try await chatModel.delete(storedSessionID: storedID)
             if selectedSessionID == storedID {
-                selectedSessionID = chatModel.sessions.first?.storedID
-                if let selectedSessionID { await selectSession(selectedSessionID) }
+                if let nextStoredID = chatModel.sessions.first?.storedID {
+                    await selectSession(nextStoredID)
+                } else {
+                    _ = beginSessionSelectionOperation()
+                    await commitSelectedSessionID(nil)
+                }
             }
         } catch {
             errorMessage = String(localized: "error.session.delete")
@@ -284,6 +321,98 @@ public final class AppModel {
 
     public func clearError() {
         errorMessage = nil
+        hasSceneRecoveryError = false
+    }
+
+    private func beginSessionSelectionOperation() -> UInt {
+        invalidateSceneRecovery()
+        sessionSelectionGeneration &+= 1
+        return sessionSelectionGeneration
+    }
+
+    private func isCurrentSessionSelectionOperation(_ generation: UInt) -> Bool {
+        generation == sessionSelectionGeneration
+    }
+
+    private func commitSelectedSessionID(_ storedSessionID: String?) async {
+        selectedSessionID = storedSessionID
+        guard let profileID = profile?.id else { return }
+        await dependencies.profileRepository.saveStoredSessionID(
+            storedSessionID,
+            profileID: profileID
+        )
+    }
+
+    private func scheduleSceneRecovery() {
+        guard phase == .connected,
+              sceneRecoveryTask == nil,
+              chatModel != nil,
+              profile != nil else { return }
+        sceneRecoveryGeneration &+= 1
+        let recoveryGeneration = sceneRecoveryGeneration
+        let selectionGeneration = sessionSelectionGeneration
+        sceneRecoveryTask = Task { [weak self] in
+            guard let self else { return }
+            await self.performSceneRecovery(
+                recoveryGeneration: recoveryGeneration,
+                selectionGeneration: selectionGeneration
+            )
+        }
+    }
+
+    private func invalidateSceneRecovery() {
+        sceneRecoveryGeneration &+= 1
+        sceneRecoveryTask?.cancel()
+        sceneRecoveryTask = nil
+    }
+
+    private func performSceneRecovery(
+        recoveryGeneration: UInt,
+        selectionGeneration: UInt
+    ) async {
+        defer {
+            if recoveryGeneration == sceneRecoveryGeneration {
+                sceneRecoveryTask = nil
+            }
+        }
+        guard recoveryGeneration == sceneRecoveryGeneration,
+              selectionGeneration == sessionSelectionGeneration,
+              isSceneActive,
+              let profile,
+              let chatModel else { return }
+
+        let persistedSessionID = await dependencies.profileRepository.loadStoredSessionID(
+            profileID: profile.id
+        )
+        guard recoveryGeneration == sceneRecoveryGeneration,
+              selectionGeneration == sessionSelectionGeneration,
+              isSceneActive else { return }
+        let storedSessionID = selectedSessionID ?? persistedSessionID
+
+        do {
+            let active = try await chatModel.reconnectAndRestore(
+                storedSessionID: storedSessionID,
+                profileID: profile.id
+            )
+            guard recoveryGeneration == sceneRecoveryGeneration,
+                  selectionGeneration == sessionSelectionGeneration,
+                  isSceneActive,
+                  self.chatModel === chatModel else { return }
+            await commitSelectedSessionID(active.storedID)
+            if hasSceneRecoveryError,
+               errorMessage == String(localized: "error.restore.connection") {
+                errorMessage = nil
+            }
+            hasSceneRecoveryError = false
+        } catch is CancellationError {
+            return
+        } catch {
+            guard recoveryGeneration == sceneRecoveryGeneration,
+                  selectionGeneration == sessionSelectionGeneration,
+                  isSceneActive else { return }
+            hasSceneRecoveryError = true
+            errorMessage = String(localized: "error.restore.connection")
+        }
     }
 
     private func activate(profile: GatewayProfile, credentials: GatewayCredentials) async throws {
@@ -318,19 +447,18 @@ public final class AppModel {
         )
         configureSignals(for: chatModel)
 
+        let storedSessionID = await repository.loadStoredSessionID(profileID: profile.id)
         try await chatModel.connect()
-        try await chatModel.loadSessions()
-        if let first = chatModel.sessions.first {
-            _ = try await chatModel.resume(storedSessionID: first.storedID, profileID: profile.id)
-            selectedSessionID = first.storedID
-        } else {
-            let active = try await chatModel.createSession(profileID: profile.id)
-            selectedSessionID = active.storedID
-        }
+        let active = try await chatModel.restoreSession(
+            storedSessionID: storedSessionID,
+            profileID: profile.id
+        )
+        await repository.saveStoredSessionID(active.storedID, profileID: profile.id)
 
         self.profile = profile
         self.gatewayRESTClient = restClient
         self.chatModel = chatModel
+        self.selectedSessionID = active.storedID
         self.phase = .connected
         _ = await dependencies.notificationService.requestAuthorization()
     }

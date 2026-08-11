@@ -11,7 +11,16 @@ struct HermesMobileApp: App {
                 .environment(appModel)
                 .task { await appModel.bootstrap() }
                 .onChange(of: scenePhase) { _, nextPhase in
-                    appModel.setSceneActive(nextPhase == .active)
+                    switch nextPhase {
+                    case .active:
+                        appModel.setSceneActive(true)
+                    case .background:
+                        appModel.setSceneActive(false)
+                    case .inactive:
+                        break
+                    @unknown default:
+                        break
+                    }
                 }
         }
     }

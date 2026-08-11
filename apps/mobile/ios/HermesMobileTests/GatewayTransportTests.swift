@@ -86,30 +86,59 @@ final class GatewayTransportTests: XCTestCase {
         XCTAssertEqual(count, 2)
     }
 
-    func testStaleReceiveFailureDoesNotClearReplacementSocket() async throws {
+    func testReconnectInvalidatesStaleEventsBeforeFreshTicketArrives() async throws {
         let first = DelayedCancelSocket()
         let second = TestSocket()
         let sockets = SocketQueue([first, second])
-        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let tickets = ReconnectTicketGate()
+        let endpoint = try GatewayEndpoint(rawValue: "https://gateway.example.com")
         let transport = HermesGatewayTransport(
             endpoint: endpoint,
-            auth: .token("test-token"),
+            auth: .ticketProvider { try await tickets.next() },
             socketFactory: { _ in sockets.next() }
         )
 
         try await transport.connect()
         await first.waitUntilReceiving()
-        await transport.disconnect()
-        try await transport.connect()
-        await first.releaseFailure()
-        await Task.yield()
+        let reconnect = Task { try await transport.reconnect(maxAttempts: 1) }
+        await tickets.waitUntilReconnectRequested()
 
-        let request = Task { try await transport.request(GatewayMethod.sessionList, params: [:]) }
-        let frames = await second.waitForRequests(count: 1)
-        await second.push(.response(id: frames[0].id, result: .object(["ok": .bool(true)])))
+        let staleData = try JSONEncoder().encode(
+            JSONRPCEventFrame(
+                event: GatewayEvent(type: .sessionsChanged, sessionID: nil, payload: nil)
+            )
+        )
+        await first.release(staleData)
+        await tickets.releaseReconnect()
+        try await reconnect.value
 
-        let response = try await request.value
-        XCTAssertEqual(response, .object(["ok": .bool(true)]))
+        await second.push(
+            .event(GatewayEvent(type: .gatewayReady, sessionID: nil, payload: nil))
+        )
+        let event = await transport.nextEvent()
+        XCTAssertEqual(event?.type, .gatewayReady)
+    }
+}
+
+private actor ReconnectTicketGate {
+    private var count = 0
+    private var reconnectContinuation: CheckedContinuation<String, Error>?
+
+    func next() async throws -> String {
+        count += 1
+        if count == 1 { return "ticket-initial" }
+        return try await withCheckedThrowingContinuation { continuation in
+            reconnectContinuation = continuation
+        }
+    }
+
+    func waitUntilReconnectRequested() async {
+        while reconnectContinuation == nil { await Task.yield() }
+    }
+
+    func releaseReconnect() {
+        reconnectContinuation?.resume(returning: "ticket-reconnect")
+        reconnectContinuation = nil
     }
 }
 
@@ -164,6 +193,11 @@ private actor DelayedCancelSocket: GatewaySocket {
     }
 
     func cancel() async {}
+
+    func release(_ data: Data) {
+        continuation?.resume(returning: data)
+        continuation = nil
+    }
 
     func releaseFailure() {
         continuation?.resume(throwing: GatewayTransportError.connectionLost)
