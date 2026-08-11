@@ -19,4 +19,9 @@
   <string name="oauth_sign_in_with">Sign in with %1$s</string>
   <string name="oauth_pending">Complete browser sign-in, then return to Hermes.</string>
   <string name="oauth_cancel">Cancel sign-in</string>
+  <string name="notification_channel_name">Session updates</string>
+  <string name="notification_channel_description">Completion, approval, and input updates</string>
+  <string name="notification_completion_body">A response is ready.</string>
+  <string name="notification_approval_body">Approval is required.</string>
+  <string name="notification_input_body">Input is required.</string>
 </resources>

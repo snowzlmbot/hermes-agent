@@ -5,6 +5,7 @@ import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import java.time.Instant
+import java.util.UUID
 
 class AndroidProfileStore(context: Context) : ProfileStore {
   private val preferences = context.getSharedPreferences("hermes.mobile.connection", Context.MODE_PRIVATE)
@@ -14,10 +15,16 @@ class AndroidProfileStore(context: Context) : ProfileStore {
     val authMode = preferences.getString(KEY_AUTH_MODE, null)
       ?.let { runCatching { GatewayAuthMode.valueOf(it) }.getOrNull() }
       ?: return null
+    val profileId = preferences.getString(KEY_PROFILE_ID, null)
+      ?.takeIf(String::isNotBlank)
+      ?: UUID.randomUUID().toString().also { generated ->
+        preferences.edit(commit = true) { putString(KEY_PROFILE_ID, generated) }
+      }
     return GatewayProfile(
       address = address,
       authMode = authMode,
       allowInsecure = preferences.getBoolean(KEY_ALLOW_INSECURE, false),
+      id = profileId,
     )
   }
 
@@ -26,6 +33,7 @@ class AndroidProfileStore(context: Context) : ProfileStore {
       putString(KEY_ADDRESS, profile.address)
       putString(KEY_AUTH_MODE, profile.authMode.name)
       putBoolean(KEY_ALLOW_INSECURE, profile.allowInsecure)
+      putString(KEY_PROFILE_ID, profile.id)
     }
   }
 
@@ -37,6 +45,7 @@ class AndroidProfileStore(context: Context) : ProfileStore {
     const val KEY_ADDRESS = "address"
     const val KEY_AUTH_MODE = "auth_mode"
     const val KEY_ALLOW_INSECURE = "allow_insecure"
+    const val KEY_PROFILE_ID = "profile_id"
   }
 }
 

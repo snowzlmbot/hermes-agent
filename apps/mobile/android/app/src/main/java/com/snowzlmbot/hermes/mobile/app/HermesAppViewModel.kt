@@ -21,7 +21,12 @@ import com.snowzlmbot.hermes.mobile.feature.ChatController
 import com.snowzlmbot.hermes.mobile.feature.AndroidStoredSessionSelectionStore
 import com.snowzlmbot.hermes.mobile.feature.MobileChatUiState
 import com.snowzlmbot.hermes.mobile.platform.AttachmentPayload
+import com.snowzlmbot.hermes.mobile.platform.LocalNotificationService
+import com.snowzlmbot.hermes.mobile.platform.NotificationProfileScope
+import com.snowzlmbot.hermes.mobile.platform.NotificationRouteMetadata
+import com.snowzlmbot.hermes.mobile.platform.StoredSessionRoute
 import java.io.ByteArrayOutputStream
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Job
@@ -49,6 +54,9 @@ internal data class AppUiState(
 
 internal class HermesAppViewModel(application: Application) : AndroidViewModel(application) {
   private val graph = (application as HermesApplication).graph
+  private val notificationService = LocalNotificationService(application)
+  private val notificationRoutes = StoredSessionRouteQueue()
+  private var activeNotificationProfileScope: String? = null
   private val mutableState = MutableStateFlow(AppUiState())
   private var controller: ChatController? = null
   private var chatCollection: kotlinx.coroutines.Job? = null
@@ -97,7 +105,12 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       }
       try {
         graph.saveConnection(
-          GatewayProfile(address.trim(), GatewayAuthMode.TOKEN, allowInsecure),
+          GatewayProfile(
+            address = address.trim(),
+            authMode = GatewayAuthMode.TOKEN,
+            allowInsecure = allowInsecure,
+            id = UUID.randomUUID().toString(),
+          ),
           SecretValue(cleanToken),
         )
         connectSaved(generation)
@@ -213,6 +226,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
             address = pending.endpoint.httpBaseUrl.toString(),
             authMode = GatewayAuthMode.OAUTH,
             allowInsecure = false,
+            id = UUID.randomUUID().toString(),
           ),
           StoredGatewayAuth.OAuth(tokens),
         )
@@ -258,7 +272,15 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
     startConnectSaved()
   }
 
+  fun handleNotificationRoute(route: StoredSessionRoute) {
+    if (!NotificationRouteMetadata.isValid(route)) return
+    notificationRoutes.enqueue(route)
+    consumeNotificationRouteIfReady()
+  }
+
   fun forgetConnection() {
+    notificationRoutes.clear()
+    activeNotificationProfileScope = null
     resetOAuthFlow()
     foregroundRecoveryArmed = false
     val generation = nextConnectionGeneration()
@@ -272,8 +294,8 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
         controller = null
         chatCollection?.cancel()
         chatCollection = null
-        graph.restoreConnection()?.profile?.address?.let { address ->
-          AndroidStoredSessionSelectionStore(getApplication<Application>(), address).clear()
+        graph.restoreConnection()?.profile?.sessionSelectionScope?.let { scope ->
+          AndroidStoredSessionSelectionStore(getApplication<Application>(), scope).clear()
         }
         graph.clearConnection()
         if (isCurrentConnection(generation)) {
@@ -289,10 +311,12 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
   }
 
   fun newSession() {
+    notificationRoutes.clear()
     viewModelScope.launch { controller?.newSession() }
   }
 
   fun openSession(storedId: String) {
+    notificationRoutes.clear()
     viewModelScope.launch { controller?.openSession(storedId) }
   }
 
@@ -403,7 +427,15 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
     )
   }
 
+  private fun consumeNotificationRouteIfReady() {
+    val profileScope = activeNotificationProfileScope ?: return
+    val target = controller ?: return
+    val route = notificationRoutes.consume(profileScope) ?: return
+    viewModelScope.launch { target.openSession(route.storedSessionId) }
+  }
+
   private fun startConnectSaved() {
+    activeNotificationProfileScope = null
     controller?.close()
     controller = null
     chatCollection?.cancel()
@@ -431,10 +463,19 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       mutableState.value = AppUiState(screen = AppScreen.ONBOARDING)
       return
     }
+    val notificationProfileScope = NotificationProfileScope.fromSelectionScope(connection.profile.sessionSelectionScope)
     val next = ChatController(
       runtime = graph.runtime(connection),
       scope = viewModelScope,
-      selectionStore = AndroidStoredSessionSelectionStore(getApplication<Application>(), connection.profile.address),
+      selectionStore = AndroidStoredSessionSelectionStore(getApplication<Application>(), connection.profile.sessionSelectionScope),
+      onNotification = { signal ->
+        if (isCurrentConnection(generation) && activeNotificationProfileScope == notificationProfileScope) {
+          notificationService.post(
+            signal.kind,
+            StoredSessionRoute(signal.storedSessionId, notificationProfileScope),
+          )
+        }
+      },
     )
     var installed = false
     try {
@@ -446,6 +487,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       val previous = controller
       installed = true
       controller = next
+      activeNotificationProfileScope = notificationProfileScope
       previous?.close()
       chatCollection?.cancel()
       chatCollection = viewModelScope.launch {
@@ -456,6 +498,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
         }
       }
       mutableState.value = AppUiState(screen = AppScreen.CHAT, chat = next.state.value)
+      consumeNotificationRouteIfReady()
     } finally {
       if (!installed) next.close()
     }
