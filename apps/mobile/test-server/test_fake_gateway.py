@@ -367,7 +367,9 @@ class FakeGatewayContractTests(unittest.TestCase):
             ["stored_session_id", "event_type", "stable_identity"],
         )
         self.assertEqual(event_replay["capacity"], 1024)
+        self.assertEqual(event_replay["profile_scope_input"], "session_selection_scope")
         self.assertEqual(event_replay["payload_stable_identity_fields"], ["event_id", "sequence"])
+        self.assertEqual(event_replay["stable_identity_value_types"], ["string", "integer"])
         self.assertEqual(event_replay["missing_stable_identity_action"], "process")
         self.assertEqual(
             event_replay["duplicate_action"],
