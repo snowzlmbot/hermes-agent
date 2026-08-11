@@ -88,6 +88,9 @@ internal object ChatReducer {
     if (runtime != null && event.runtimeSessionId != null && event.runtimeSessionId != runtime) {
       return state
     }
+    if (event.type.requiresExactRuntime() && (runtime == null || event.runtimeSessionId != runtime)) {
+      return state
+    }
     val payload = event.payload
     return when (event.type) {
       GatewayEventType.MESSAGE_START -> state.copy(
@@ -150,6 +153,19 @@ internal object ChatReducer {
       )
       else -> state
     }
+  }
+
+  private fun GatewayEventType.requiresExactRuntime(): Boolean = when (this) {
+    GatewayEventType.MESSAGE_COMPLETE,
+    GatewayEventType.APPROVAL_REQUEST,
+    GatewayEventType.CLARIFY_REQUEST,
+    GatewayEventType.SECRET_REQUEST,
+    GatewayEventType.SUDO_REQUEST,
+    GatewayEventType.CLARIFY_EXPIRE,
+    GatewayEventType.SECRET_EXPIRE,
+    GatewayEventType.SUDO_EXPIRE,
+    -> true
+    else -> false
   }
 
   private fun messageId(payload: JsonObject, state: ChatState): String =

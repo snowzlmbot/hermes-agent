@@ -67,6 +67,18 @@ class ChatReducerTest {
   }
 
   @Test
+  fun ignoresActionEventsWithoutCurrentRuntimeIdentity() {
+    val state = ChatState.empty().copy(runtimeSessionId = "runtime-1")
+    val event = GatewayEvent(
+      type = GatewayEventType.APPROVAL_REQUEST,
+      wireType = "approval.request",
+      runtimeSessionId = null,
+      payload = jsonObject("""{"command":"secret"}"""),
+    )
+    assertEquals(state, ChatReducer.reduce(state, event))
+  }
+
+  @Test
   fun ignoresEventsFromAnotherRuntimeSession() {
     val state = ChatState.empty().copy(runtimeSessionId = "runtime-1")
     val other = GatewayEvent(
