@@ -115,7 +115,7 @@ final class SessionRecoveryTests: XCTestCase {
             to: staleList[0],
             result: sessionListResult(["stored-stale"])
         )
-        _ = staleRecovery.value
+        _ = await staleRecovery.value
 
         let finalRequests = await replacementSocket.requestsSnapshot()
         XCTAssertEqual(finalRequests.count, 2)
