@@ -24,6 +24,7 @@ public final class ChatModel {
     public private(set) var controlErrorMessage: String?
 
     @ObservationIgnored public var signalHandler: (@MainActor (ChatSignal) -> Void)?
+    @ObservationIgnored public var invalidStoredSessionHandler: (@MainActor () async -> Void)?
     @ObservationIgnored private let transport: HermesGatewayTransport
     @ObservationIgnored private let archiveStore: (any SessionArchiveStore)?
     @ObservationIgnored private let sessionMutationClient: (any SessionMutationClient)?
@@ -211,7 +212,7 @@ public final class ChatModel {
                       connectionGeneration.map(isCurrentConnectionOperation) ?? true else {
                     throw CancellationError()
                 }
-                signalHandler?(.sessionSelectionChanged(storedID: nil))
+                await invalidStoredSessionHandler?()
             }
         }
         let active = try await requestCreate(profileID: profileID, generation: sessionGeneration)

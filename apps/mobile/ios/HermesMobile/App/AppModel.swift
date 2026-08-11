@@ -345,7 +345,7 @@ public final class AppModel {
         if let expectedGeneration,
            !isCurrentSessionSelectionOperation(expectedGeneration) { return }
         selectedSessionID = storedSessionID
-        guard let profile else { return }
+        guard let profile = profile else { return }
         await dependencies.profileRepository.saveStoredSessionID(
             storedSessionID,
             for: profile
@@ -454,7 +454,7 @@ public final class AppModel {
             transport: transport,
             sessionMutationClient: restClient
         )
-        configureSignals(for: chatModel)
+        configureSignals(for: chatModel, profile: profile)
 
         let storedSessionID = await repository.loadStoredSessionID(for: profile)
         try await chatModel.connect()
@@ -472,7 +472,14 @@ public final class AppModel {
         _ = await dependencies.notificationService.requestAuthorization()
     }
 
-    private func configureSignals(for chatModel: ChatModel) {
+    private func configureSignals(for chatModel: ChatModel, profile: GatewayProfile) {
+        chatModel.invalidStoredSessionHandler = { [weak self, weak chatModel] in
+            guard let self, let chatModel else { return }
+            await self.dependencies.profileRepository.saveStoredSessionID(nil, for: profile)
+            if self.chatModel == nil || self.chatModel === chatModel {
+                self.selectedSessionID = nil
+            }
+        }
         chatModel.signalHandler = { [weak self, weak chatModel] signal in
             guard let self, let chatModel else { return }
             switch signal {

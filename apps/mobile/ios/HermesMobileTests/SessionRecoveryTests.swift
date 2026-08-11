@@ -153,6 +153,10 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(active.storedID, "stored-new")
         XCTAssertEqual(model.state.runtimeSessionID, "runtime-new")
 
+        var invalidSelectionCleared = false
+        model.invalidStoredSessionHandler = {
+            invalidSelectionCleared = true
+        }
         let missing = Task {
             try await model.restoreSession(storedSessionID: "stored-missing")
         }
@@ -162,6 +166,7 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(secondResume[3].method, GatewayMethod.sessionResume)
         await socket.respondError(to: secondResume[3], error: JSONRPCError(code: 4007, message: "session not found"))
         let secondCreate = await socket.waitForRequests(count: 5)
+        XCTAssertTrue(invalidSelectionCleared)
         XCTAssertEqual(secondCreate[4].method, GatewayMethod.sessionCreate)
         await socket.respond(
             to: secondCreate[4],
