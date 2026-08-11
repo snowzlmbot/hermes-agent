@@ -345,6 +345,9 @@ class FakeGatewayContractTests(unittest.TestCase):
         )
         notification_routing = contract["notification_routing"]
         self.assertEqual(notification_routing["identity_field"], "stored_session_id")
+        self.assertEqual(notification_routing["profile_scope_field"], "profile_scope")
+        self.assertEqual(notification_routing["profile_scope_encoding"], "sha256")
+        self.assertEqual(notification_routing["scope_mismatch_action"], "discard")
         self.assertTrue(notification_routing["profile_scoped"])
         self.assertTrue(notification_routing["single_consume"])
         self.assertIn("session_id", notification_routing["forbidden_fields"])

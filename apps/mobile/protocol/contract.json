@@ -77,6 +77,9 @@
   },
   "notification_routing": {
     "identity_field": "stored_session_id",
+    "profile_scope_field": "profile_scope",
+    "profile_scope_encoding": "sha256",
+    "scope_mismatch_action": "discard",
     "profile_scoped": true,
     "single_consume": true,
     "forbidden_fields": [
