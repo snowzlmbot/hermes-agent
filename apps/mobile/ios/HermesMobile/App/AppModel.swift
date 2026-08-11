@@ -8,6 +8,10 @@ public enum AppPhase: Equatable, Sendable {
     case connected
 }
 
+private struct PendingStoredSessionRoute: Sendable {
+    let route: NotificationRoute
+}
+
 @MainActor
 @Observable
 public final class AppModel {
@@ -28,7 +32,15 @@ public final class AppModel {
     @ObservationIgnored private var sceneRecoveryTask: Task<Void, Never>?
     @ObservationIgnored private var sceneRecoveryGeneration: UInt = 0
     @ObservationIgnored private var sessionSelectionGeneration: UInt = 0
+    @ObservationIgnored private var profileGeneration: UInt = 0
+    @ObservationIgnored private var pendingNotificationRoutes: [PendingStoredSessionRoute] = []
+    @ObservationIgnored private var isConsumingNotificationRoutes = false
+    @ObservationIgnored private var notificationAuthorizationGranted = false
     @ObservationIgnored private var hasSceneRecoveryError = false
+
+    var pendingNotificationRouteCount: Int {
+        pendingNotificationRoutes.count
+    }
 
     public init(dependencies: AppDependencies = .live) {
         self.dependencies = dependencies
@@ -155,6 +167,7 @@ public final class AppModel {
 
     public func disconnectAndForget() async {
         invalidateSceneRecovery()
+        invalidateNotificationRouting(clearPending: true)
         await chatModel?.disconnect()
         await gatewayRESTClient?.invalidate()
         do {
@@ -167,7 +180,6 @@ public final class AppModel {
         chatModel = nil
         gatewayRESTClient = nil
         selectedSessionID = nil
-        sessionSelectionGeneration &+= 1
         oauthCapability = nil
         oauthProviders = []
         phase = .onboarding
@@ -185,6 +197,13 @@ public final class AppModel {
 
     func waitForSceneRecovery() async {
         await sceneRecoveryTask?.value
+    }
+
+    public func handleNotificationRoute(_ route: NotificationRoute) async {
+        guard NotificationRouteMetadata.normalizedStoredSessionID(route.storedSessionID) != nil,
+              NotificationRouteMetadata.normalizedProfileScope(route.profileScope) != nil else { return }
+        pendingNotificationRoutes.append(PendingStoredSessionRoute(route: route))
+        await consumePendingNotificationRoutesIfPossible()
     }
 
     public func createSession() async {
@@ -224,11 +243,33 @@ public final class AppModel {
     }
 
     public func selectSession(_ storedID: String) async {
-        guard let chatModel else { return }
+        guard let profile else { return }
+        pendingNotificationRoutes.removeAll(keepingCapacity: true)
+        await selectSession(
+            storedID,
+            expectedProfileScope: profile.sessionSelectionScope,
+            expectedProfileGeneration: profileGeneration
+        )
+    }
+
+    private func selectSession(
+        _ storedID: String,
+        expectedProfileScope: String,
+        expectedProfileGeneration: UInt
+    ) async {
+        guard isCurrentProfileContext(
+            scope: expectedProfileScope,
+            generation: expectedProfileGeneration
+        ), let chatModel else { return }
         let generation = await beginSessionSelectionOperation()
+        guard isCurrentProfileContext(
+            scope: expectedProfileScope,
+            generation: expectedProfileGeneration,
+            chatModel: chatModel
+        ) else { return }
         if chatModel.state.storedSessionID == storedID {
             guard isCurrentSessionSelectionOperation(generation) else { return }
-            await commitSelectedSessionID(storedID)
+            await commitSelectedSessionID(storedID, expectedGeneration: generation)
             return
         }
         do {
@@ -236,10 +277,20 @@ public final class AppModel {
                 storedSessionID: storedID,
                 profileID: profile?.id ?? "default"
             )
-            guard isCurrentSessionSelectionOperation(generation) else { return }
-            await commitSelectedSessionID(active.storedID)
+            guard isCurrentSessionSelectionOperation(generation),
+                  isCurrentProfileContext(
+                      scope: expectedProfileScope,
+                      generation: expectedProfileGeneration,
+                      chatModel: chatModel
+                  ) else { return }
+            await commitSelectedSessionID(active.storedID, expectedGeneration: generation)
         } catch {
-            guard isCurrentSessionSelectionOperation(generation) else { return }
+            guard isCurrentSessionSelectionOperation(generation),
+                  isCurrentProfileContext(
+                      scope: expectedProfileScope,
+                      generation: expectedProfileGeneration,
+                      chatModel: chatModel
+                  ) else { return }
             errorMessage = String(localized: "error.session.resume")
         }
     }
@@ -322,6 +373,52 @@ public final class AppModel {
     public func clearError() {
         errorMessage = nil
         hasSceneRecoveryError = false
+    }
+
+    private func consumePendingNotificationRoutesIfPossible() async {
+        guard phase == .connected,
+              profile != nil,
+              chatModel?.isConnected == true,
+              !isConsumingNotificationRoutes else { return }
+        isConsumingNotificationRoutes = true
+        defer { isConsumingNotificationRoutes = false }
+
+        while phase == .connected,
+              let currentProfile = profile,
+              chatModel?.isConnected == true,
+              !pendingNotificationRoutes.isEmpty {
+            let pending = pendingNotificationRoutes.removeFirst()
+            let expectedProfileScope = NotificationRouteMetadata.profileScope(
+                for: currentProfile.sessionSelectionScope
+            )
+            guard pending.route.profileScope == expectedProfileScope else { continue }
+            await selectSession(
+                pending.route.storedSessionID,
+                expectedProfileScope: currentProfile.sessionSelectionScope,
+                expectedProfileGeneration: profileGeneration
+            )
+        }
+    }
+
+    private func isCurrentProfileContext(
+        scope: String,
+        generation: UInt,
+        chatModel expectedChatModel: ChatModel? = nil
+    ) -> Bool {
+        guard generation == profileGeneration,
+              profile?.sessionSelectionScope == scope else { return false }
+        guard let expectedChatModel else { return true }
+        guard let currentChatModel = chatModel else { return false }
+        return currentChatModel === expectedChatModel
+    }
+
+    private func invalidateNotificationRouting(clearPending: Bool) {
+        profileGeneration &+= 1
+        sessionSelectionGeneration &+= 1
+        notificationAuthorizationGranted = false
+        if clearPending {
+            pendingNotificationRoutes.removeAll(keepingCapacity: true)
+        }
     }
 
     private func beginSessionSelectionOperation() async -> UInt {
@@ -429,6 +526,7 @@ public final class AppModel {
             rawValue: profile.endpoint,
             allowInsecureRemote: profile.allowInsecure
         )
+        invalidateNotificationRouting(clearPending: false)
         let repository = dependencies.profileRepository
         let restClient = GatewayRESTClient(
             endpoint: endpoint,
@@ -469,10 +567,22 @@ public final class AppModel {
         self.chatModel = chatModel
         self.selectedSessionID = active.storedID
         self.phase = .connected
-        _ = await dependencies.notificationService.requestAuthorization()
+        await consumePendingNotificationRoutesIfPossible()
+        notificationAuthorizationGranted = await dependencies.notificationService.requestAuthorization()
+    }
+
+    private func canScheduleNotification(_ route: NotificationRoute) -> Bool {
+        NotificationDeliveryPolicy.shouldSchedule(
+            isSceneActive: isSceneActive,
+            isAuthorized: notificationAuthorizationGranted,
+            route: route
+        )
     }
 
     private func configureSignals(for chatModel: ChatModel, profile: GatewayProfile) {
+        let notificationProfileScope = NotificationRouteMetadata.profileScope(
+            for: profile.sessionSelectionScope
+        )
         chatModel.invalidStoredSessionHandler = { [weak self, weak chatModel] in
             guard let self, let chatModel else { return }
             await self.dependencies.profileRepository.saveStoredSessionID(nil, for: profile)
@@ -483,23 +593,38 @@ public final class AppModel {
         chatModel.signalHandler = { [weak self, weak chatModel] signal in
             guard let self, let chatModel else { return }
             switch signal {
-            case .messageCompleted(let sessionID):
+            case .messageCompleted(let storedSessionID):
                 self.backgroundActivity.end()
-                guard !self.isSceneActive else { return }
-                let title = chatModel.sessions.first(where: { $0.storedID == chatModel.state.storedSessionID })?.displayTitle
+                guard !self.isSceneActive, let storedSessionID else { return }
+                let title = chatModel.sessions.first(where: { $0.storedID == storedSessionID })?.displayTitle
                     ?? String(localized: "session.new")
+                let route = NotificationRoute(
+                    storedSessionID: storedSessionID,
+                    profileScope: notificationProfileScope
+                )
+                guard self.canScheduleNotification(route) else { return }
                 Task {
                     await self.dependencies.notificationService.scheduleCompletion(
                         sessionTitle: title,
-                        sessionID: sessionID
+                        route: route
                     )
                 }
-            case .approvalRequired(let sessionID):
-                guard !self.isSceneActive, let sessionID else { return }
-                Task { await self.dependencies.notificationService.scheduleApproval(sessionID: sessionID) }
-            case .inputRequired(let sessionID):
-                guard !self.isSceneActive, let sessionID else { return }
-                Task { await self.dependencies.notificationService.scheduleInput(sessionID: sessionID) }
+            case .approvalRequired(let storedSessionID):
+                guard !self.isSceneActive, let storedSessionID else { return }
+                let route = NotificationRoute(
+                    storedSessionID: storedSessionID,
+                    profileScope: notificationProfileScope
+                )
+                guard self.canScheduleNotification(route) else { return }
+                Task { await self.dependencies.notificationService.scheduleApproval(route: route) }
+            case .inputRequired(let storedSessionID):
+                guard !self.isSceneActive, let storedSessionID else { return }
+                let route = NotificationRoute(
+                    storedSessionID: storedSessionID,
+                    profileScope: notificationProfileScope
+                )
+                guard self.canScheduleNotification(route) else { return }
+                Task { await self.dependencies.notificationService.scheduleInput(route: route) }
             case .sessionSelectionChanged(let storedID):
                 guard self.chatModel === chatModel else { return }
                 let generation = self.sessionSelectionGeneration

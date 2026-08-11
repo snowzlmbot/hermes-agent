@@ -206,13 +206,174 @@ final class SessionRecoveryTests: XCTestCase {
         await fulfillment(of: [corrected], timeout: 1)
         XCTAssertEqual(model.state.storedSessionID, "stored-canonical")
     }
+
+    @MainActor
+    func testColdNotificationRouteWaitsForConnectionThenSelectsStoredSessionOnce() async throws {
+        let profile = GatewayProfile(
+            id: "default",
+            endpoint: "https://gateway.example.com",
+            authMode: .token
+        )
+        let selections = InMemoryStoredSessionSelectionStore(
+            selections: [profile.sessionSelectionScope: "stored-initial"]
+        )
+        let repository = GatewayProfileRepository(
+            profileStore: InMemoryGatewayProfileStore(),
+            credentialStore: InMemoryCredentialStore(),
+            sessionSelectionStore: selections
+        )
+        try await repository.save(
+            profile: profile,
+            credentials: GatewayCredentials(token: "secret")
+        )
+        let socket = RecoverySocket()
+        let notifications = RecoveryNotificationService()
+        let model = AppModel(dependencies: AppDependencies(
+            profileRepository: repository,
+            notificationService: notifications,
+            attachmentImporter: AttachmentImportService(),
+            socketFactory: { _ in socket }
+        ))
+
+        await model.handleNotificationRoute(NotificationRoute(
+            storedSessionID: "stored-notification",
+            profileScope: NotificationRouteMetadata.profileScope(for: profile.sessionSelectionScope)
+        ))
+        XCTAssertEqual(model.pendingNotificationRouteCount, 1)
+
+        let bootstrap = Task { await model.bootstrap(arguments: []) }
+        let list = await socket.waitForRequests(count: 1)
+        await socket.respond(
+            to: list[0],
+            result: sessionListResult(["stored-initial", "stored-notification"])
+        )
+        let initialResume = await socket.waitForRequests(count: 2)
+        XCTAssertEqual(initialResume[1].params?["session_id"], .string("stored-initial"))
+        await socket.respond(
+            to: initialResume[1],
+            result: activeSessionResult(runtimeID: "runtime-initial", storedID: "stored-initial")
+        )
+        let notificationResume = await socket.waitForRequests(count: 3)
+        XCTAssertEqual(notificationResume[2].method, GatewayMethod.sessionResume)
+        XCTAssertEqual(notificationResume[2].params?["session_id"], .string("stored-notification"))
+        await socket.respond(
+            to: notificationResume[2],
+            result: activeSessionResult(runtimeID: "runtime-notification", storedID: "stored-notification")
+        )
+        await bootstrap.value
+
+        XCTAssertEqual(model.selectedSessionID, "stored-notification")
+        XCTAssertEqual(model.chatModel?.state.storedSessionID, "stored-notification")
+        XCTAssertEqual(model.pendingNotificationRouteCount, 0)
+        XCTAssertEqual((await socket.requestsSnapshot()).count, 3)
+
+        await model.handleNotificationRoute(NotificationRoute(
+            storedSessionID: "stored-wrong-gateway",
+            profileScope: String(repeating: "b", count: 64)
+        ))
+        XCTAssertEqual(model.selectedSessionID, "stored-notification")
+        XCTAssertEqual((await socket.requestsSnapshot()).count, 3)
+    }
+
+    @MainActor
+    func testHotNotificationRouteCannotOverwriteNewerSessionSelectionWhenLate() async throws {
+        let profile = GatewayProfile(
+            id: "default",
+            endpoint: "https://gateway.example.com",
+            authMode: .token
+        )
+        let selections = InMemoryStoredSessionSelectionStore(
+            selections: [profile.sessionSelectionScope: "stored-initial"]
+        )
+        let repository = GatewayProfileRepository(
+            profileStore: InMemoryGatewayProfileStore(),
+            credentialStore: InMemoryCredentialStore(),
+            sessionSelectionStore: selections
+        )
+        try await repository.save(
+            profile: profile,
+            credentials: GatewayCredentials(token: "secret")
+        )
+        let socket = RecoverySocket()
+        let model = AppModel(dependencies: AppDependencies(
+            profileRepository: repository,
+            notificationService: RecoveryNotificationService(),
+            attachmentImporter: AttachmentImportService(),
+            socketFactory: { _ in socket }
+        ))
+
+        let bootstrap = Task { await model.bootstrap(arguments: []) }
+        let list = await socket.waitForRequests(count: 1)
+        await socket.respond(
+            to: list[0],
+            result: sessionListResult(["stored-initial", "stored-notification", "stored-newer"])
+        )
+        let initialResume = await socket.waitForRequests(count: 2)
+        await socket.respond(
+            to: initialResume[1],
+            result: activeSessionResult(runtimeID: "runtime-initial", storedID: "stored-initial")
+        )
+        await bootstrap.value
+
+        let notificationRoute = Task {
+            await model.handleNotificationRoute(NotificationRoute(
+                storedSessionID: "stored-notification",
+                profileScope: NotificationRouteMetadata.profileScope(for: profile.sessionSelectionScope)
+            ))
+        }
+        let notificationResume = await socket.waitForRequests(count: 3)
+        XCTAssertEqual(notificationResume[2].params?["session_id"], .string("stored-notification"))
+
+        let newerSelection = Task { await model.selectSession("stored-newer") }
+        let newerResume = await socket.waitForRequests(count: 4)
+        XCTAssertEqual(newerResume[3].params?["session_id"], .string("stored-newer"))
+        await socket.respond(
+            to: newerResume[3],
+            result: activeSessionResult(runtimeID: "runtime-newer", storedID: "stored-newer")
+        )
+        await newerSelection.value
+
+        await socket.respond(
+            to: notificationResume[2],
+            result: activeSessionResult(runtimeID: "runtime-late", storedID: "stored-notification")
+        )
+        await notificationRoute.value
+
+        XCTAssertEqual(model.selectedSessionID, "stored-newer")
+        XCTAssertEqual(model.chatModel?.state.storedSessionID, "stored-newer")
+        XCTAssertNil(model.errorMessage)
+    }
+
+    @MainActor
+    func testForgetClearsPendingNotificationRoute() async {
+        let repository = GatewayProfileRepository(
+            profileStore: InMemoryGatewayProfileStore(),
+            credentialStore: InMemoryCredentialStore(),
+            sessionSelectionStore: InMemoryStoredSessionSelectionStore()
+        )
+        let model = AppModel(dependencies: AppDependencies(
+            profileRepository: repository,
+            notificationService: RecoveryNotificationService(),
+            attachmentImporter: AttachmentImportService()
+        ))
+
+        await model.handleNotificationRoute(NotificationRoute(
+            storedSessionID: "stored-pending",
+            profileScope: String(repeating: "a", count: 64)
+        ))
+        XCTAssertEqual(model.pendingNotificationRouteCount, 1)
+
+        await model.disconnectAndForget()
+
+        XCTAssertEqual(model.pendingNotificationRouteCount, 0)
+    }
 }
 
 private actor RecoveryNotificationService: NotificationScheduling {
     func requestAuthorization() async -> Bool { true }
-    func scheduleCompletion(sessionTitle: String, sessionID: String?) async {}
-    func scheduleApproval(sessionID: String) async {}
-    func scheduleInput(sessionID: String) async {}
+    func scheduleCompletion(sessionTitle: String, route: NotificationRoute) async {}
+    func scheduleApproval(route: NotificationRoute) async {}
+    func scheduleInput(route: NotificationRoute) async {}
 }
 
 private final class RecoverySocketQueue: @unchecked Sendable {
