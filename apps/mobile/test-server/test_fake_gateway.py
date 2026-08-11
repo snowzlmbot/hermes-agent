@@ -177,6 +177,25 @@ class FakeGatewayContractTests(unittest.TestCase):
         self.assertEqual(resumed["resumed"], stored_id)
         self.assertNotEqual(runtime_id, stored_id)
 
+        resumed_again = client.request(
+            "session.resume", {"session_id": stored_id, "source": "mobile"}
+        )
+        self.assertEqual(resumed_again["resumed"], stored_id)
+        self.assertNotEqual(resumed_again["session_id"], runtime_id)
+        self.assertNotEqual(resumed_again["session_id"], stored_id)
+        client.send_json(
+            {
+                "jsonrpc": "2.0",
+                "id": "missing-resume",
+                "method": "session.resume",
+                "params": {"session_id": "missing-stored-session", "source": "mobile"},
+            }
+        )
+        missing = client.receive_json(timeout=3)
+        self.assertEqual(missing["id"], "missing-resume")
+        self.assertEqual(missing["error"]["code"], 4007)
+        self.assertEqual(missing["error"]["message"], "session not found")
+
         ack = client.request("prompt.submit", {"session_id": runtime_id, "text": "hello"})
         self.assertEqual(ack["status"], "streaming")
 
@@ -315,6 +334,15 @@ class FakeGatewayContractTests(unittest.TestCase):
         self.assertEqual(contract["rest"]["ws_ticket"]["ttl_field"], "ttl_seconds")
         self.assertEqual(contract["responses"]["clarify.respond"], "answer")
         self.assertEqual(contract["responses"]["secret.respond"], "value")
+        session_identity = contract["session_identity"]
+        self.assertEqual(session_identity["persisted_field"], "stored_session_id")
+        self.assertEqual(session_identity["runtime_field"], "session_id")
+        self.assertTrue(session_identity["new_runtime_per_resume"])
+        self.assertEqual(session_identity["missing_stored_session_error_code"], 4007)
+        self.assertEqual(
+            session_identity["missing_stored_session_client_action"],
+            "clear_selection_and_create",
+        )
         self.assertEqual(contract["responses"]["sudo.respond"], "password")
         self.assertEqual(contract["attachments"]["file.attach"]["bytes_field"], "data_url")
         self.assertEqual(contract["frames"]["request"]["jsonrpc"], "2.0")

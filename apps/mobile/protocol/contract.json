@@ -65,6 +65,16 @@
     "archived",
     "pinned"
   ],
+  "session_identity": {
+    "persisted_field": "stored_session_id",
+    "runtime_field": "session_id",
+    "resume_input_field": "session_id",
+    "resume_input_identity": "stored_session_id",
+    "resume_output_stored_fields": ["resumed", "session_key", "info.stored_session_id"],
+    "new_runtime_per_resume": true,
+    "missing_stored_session_error_code": 4007,
+    "missing_stored_session_client_action": "clear_selection_and_create"
+  },
   "attachments": {
     "image.attach_bytes": {
       "bytes_field": "content_base64",
