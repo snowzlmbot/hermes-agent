@@ -250,6 +250,29 @@ public struct MobileContract: Decodable, Sendable {
     public let eventTypes: [GatewayEventType]
     public let frames: Frames
     public let notificationRouting: NotificationRouting
+    public let eventReplayProtection: EventReplayProtection
+
+    public struct EventReplayProtection: Decodable, Sendable {
+        public let capacity: Int
+        public let profileScopeInput: String
+        public let payloadStableIdentityFields: [String]
+        public let stableIdentityValueTypes: [String]
+        public let missingStableIdentityAction: String
+        public let duplicateAction: String
+        public let sameProfileReconnectAction: String
+        public let profileChangeAction: String
+
+        enum CodingKeys: String, CodingKey {
+            case capacity
+            case profileScopeInput = "profile_scope_input"
+            case payloadStableIdentityFields = "payload_stable_identity_fields"
+            case stableIdentityValueTypes = "stable_identity_value_types"
+            case missingStableIdentityAction = "missing_stable_identity_action"
+            case duplicateAction = "duplicate_action"
+            case sameProfileReconnectAction = "same_profile_reconnect_action"
+            case profileChangeAction = "profile_change_action"
+        }
+    }
 
     public struct NotificationRouting: Decodable, Sendable {
         public let identityField: String
@@ -289,6 +312,7 @@ public struct MobileContract: Decodable, Sendable {
         case eventTypes = "event_types"
         case frames
         case notificationRouting = "notification_routing"
+        case eventReplayProtection = "event_replay_protection"
     }
 
     public static func loadBundled(bundle: Bundle = .main) throws -> MobileContract {

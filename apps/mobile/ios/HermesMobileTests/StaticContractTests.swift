@@ -45,5 +45,13 @@ final class StaticContractTests: XCTestCase {
         XCTAssertEqual(contract.notificationRouting.scopeMismatchAction, "discard")
         XCTAssertTrue(contract.notificationRouting.singleConsume)
         XCTAssertTrue(contract.notificationRouting.forbiddenFields.contains("session_id"))
+        XCTAssertEqual(contract.eventReplayProtection.capacity, 1024)
+        XCTAssertEqual(contract.eventReplayProtection.profileScopeInput, "session_selection_scope")
+        XCTAssertEqual(contract.eventReplayProtection.payloadStableIdentityFields, ["event_id", "sequence"])
+        XCTAssertEqual(contract.eventReplayProtection.stableIdentityValueTypes, ["string", "integer"])
+        XCTAssertEqual(contract.eventReplayProtection.missingStableIdentityAction, "process")
+        XCTAssertEqual(contract.eventReplayProtection.duplicateAction, "discard_before_reducer_and_signal")
+        XCTAssertEqual(contract.eventReplayProtection.sameProfileReconnectAction, "retain")
+        XCTAssertEqual(contract.eventReplayProtection.profileChangeAction, "clear")
     }
 }
