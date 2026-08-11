@@ -56,7 +56,7 @@ internal class AppGraph(
       val auth = authCoordinatorFactory(connection, connections)
       replaceActiveCoordinator(auth)
       return HermesMobileRuntime(
-        socket = GatewaySocketClient(
+        rpc = GatewaySocketClient(
           endpoint = endpoint,
           credentialProvider = auth::socketCredential,
         ),
