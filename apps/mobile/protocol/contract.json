@@ -95,8 +95,10 @@
   },
   "event_replay_protection": {
     "dedup_key_fields": ["stored_session_id", "event_type", "stable_identity"],
+    "profile_scope_input": "session_selection_scope",
     "capacity": 1024,
     "payload_stable_identity_fields": ["event_id", "sequence"],
+    "stable_identity_value_types": ["string", "integer"],
     "single_occurrence_identity_fields": {
       "message.start": ["message_id"],
       "message.complete": ["message_id"],
