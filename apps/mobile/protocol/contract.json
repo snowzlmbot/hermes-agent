@@ -78,7 +78,8 @@
   "notification_routing": {
     "identity_field": "stored_session_id",
     "profile_scope_field": "profile_scope",
-    "profile_scope_encoding": "sha256",
+    "profile_scope_encoding": "sha256_hex_lowercase",
+    "profile_scope_input": "session_selection_scope",
     "scope_mismatch_action": "discard",
     "profile_scoped": true,
     "single_consume": true,
