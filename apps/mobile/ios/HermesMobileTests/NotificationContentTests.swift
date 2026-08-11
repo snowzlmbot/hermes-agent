@@ -27,7 +27,8 @@ final class NotificationContentTests: XCTestCase {
         )
 
         XCTAssertEqual(content.title, "Hermes")
-        XCTAssertEqual(content.body, "Release checklist is ready")
+        XCTAssertEqual(content.body, "A response is ready")
+        XCTAssertFalse(content.body.contains("Release checklist"))
         XCTAssertEqual(content.categoryIdentifier, NotificationCategory.completion)
         XCTAssertEqual(content.userInfo as? [String: String], [
             NotificationRouteMetadata.storedSessionIDKey: "stored-1",

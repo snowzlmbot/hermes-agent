@@ -249,6 +249,29 @@ public struct MobileContract: Decodable, Sendable {
     public let rpcMethods: [String]
     public let eventTypes: [GatewayEventType]
     public let frames: Frames
+    public let notificationRouting: NotificationRouting
+
+    public struct NotificationRouting: Decodable, Sendable {
+        public let identityField: String
+        public let allowedFields: [String]
+        public let profileScopeField: String
+        public let profileScopeEncoding: String
+        public let profileScopeInput: String
+        public let scopeMismatchAction: String
+        public let singleConsume: Bool
+        public let forbiddenFields: [String]
+
+        enum CodingKeys: String, CodingKey {
+            case identityField = "identity_field"
+            case allowedFields = "allowed_fields"
+            case profileScopeField = "profile_scope_field"
+            case profileScopeEncoding = "profile_scope_encoding"
+            case profileScopeInput = "profile_scope_input"
+            case scopeMismatchAction = "scope_mismatch_action"
+            case singleConsume = "single_consume"
+            case forbiddenFields = "forbidden_fields"
+        }
+    }
 
     public struct Frames: Decodable, Sendable {
         public let request: [String: JSONValue]
@@ -261,7 +284,11 @@ public struct MobileContract: Decodable, Sendable {
     public var eventExample: [String: JSONValue] { frames.event }
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion = "schema_version", rpcMethods = "rpc_methods", eventTypes = "event_types", frames
+        case schemaVersion = "schema_version"
+        case rpcMethods = "rpc_methods"
+        case eventTypes = "event_types"
+        case frames
+        case notificationRouting = "notification_routing"
     }
 
     public static func loadBundled(bundle: Bundle = .main) throws -> MobileContract {

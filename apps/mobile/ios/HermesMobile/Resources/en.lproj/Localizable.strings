@@ -88,7 +88,7 @@
 "action.more" = "More actions";
 "delete.session.title" = "Delete session?";
 "delete.session.message" = "This permanently deletes the stored transcript.";
-"notification.completion.body" = "%@ is ready";
+"notification.completion.body" = "A response is ready";
 "notification.approval.body" = "A session needs your approval";
 "notification.input.body" = "A session is waiting for input";
 "audio.microphone.error" = "Microphone access is required to record a voice message.";

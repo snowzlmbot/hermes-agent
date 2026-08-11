@@ -75,15 +75,11 @@ enum NotificationDeliveryPolicy {
 
 public enum NotificationContentFactory {
     public static func completion(
-        sessionTitle: String,
+        sessionTitle _: String,
         route: NotificationRoute
     ) -> UNMutableNotificationContent {
         let content = baseContent(route: route)
-        content.body = String(
-            format: String(localized: "notification.completion.body"),
-            locale: Locale.current,
-            sessionTitle
-        )
+        content.body = String(localized: "notification.completion.body")
         content.categoryIdentifier = NotificationCategory.completion
         return content
     }
