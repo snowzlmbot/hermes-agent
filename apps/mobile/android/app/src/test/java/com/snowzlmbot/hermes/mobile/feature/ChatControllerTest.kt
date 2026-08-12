@@ -302,7 +302,7 @@ class ChatControllerTest {
   @Test
   fun restoreSessionRefreshesArchiveWithoutChangingCurrentIdentity() = runTest {
     val runtime = RecordingRuntime()
-    runtime.listedSessions = listOf(summary("stored-archived").copy(archived = true))
+    runtime.listedSessions = listOf(archivedSummary("stored-archived"))
     val controller = ChatController(runtime, backgroundScope)
     controller.connect()
     controller.newSession()
@@ -318,7 +318,7 @@ class ChatControllerTest {
   @Test
   fun restoreFailureKeepsArchivedEntryAndCurrentIdentity() = runTest {
     val runtime = RecordingRuntime().apply {
-      listedSessions = listOf(summary("stored-archived").copy(archived = true))
+      listedSessions = listOf(archivedSummary("stored-archived"))
       failSessionUpdates = true
     }
     val controller = ChatController(runtime, backgroundScope)
@@ -332,6 +332,17 @@ class ChatControllerTest {
     assertEquals(identity, controller.state.value.chat.runtimeSessionId to controller.state.value.chat.storedSessionId)
     assertNotNull(controller.state.value.error)
   }
+
+  private fun archivedSummary(id: String) = SessionSummary(
+    storedId = id,
+    title = "",
+    preview = "",
+    startedAt = 0,
+    lastActive = 0,
+    messageCount = 0,
+    source = "mobile",
+    archived = true,
+  )
 
   private class RecordingRuntime : MobileGatewayRuntime {
     override val events = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 8)
