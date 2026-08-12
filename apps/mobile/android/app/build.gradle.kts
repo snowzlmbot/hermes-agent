@@ -51,7 +51,7 @@ android {
 
 androidComponents {
   beforeVariants(selector().withBuildType("release")) { variantBuilder ->
-    variantBuilder.enableUnitTest = true
+    (variantBuilder as com.android.build.api.variant.HasUnitTestBuilder).enableUnitTest = true
   }
 }
 
