@@ -361,6 +361,22 @@ class FakeGatewayContractTests(unittest.TestCase):
         self.assertIn("content", notification_routing["forbidden_fields"])
         self.assertIn("prompt", notification_routing["forbidden_fields"])
         self.assertIn("approval", notification_routing["forbidden_fields"])
+        session_library = contract["session_library"]
+        self.assertEqual(session_library["scope"], "loaded_sessions_only")
+        self.assertEqual(
+            session_library["search_fields"],
+            ["display_title", "title", "preview", "stored_session_id"],
+        )
+        self.assertEqual(session_library["query_normalization"], "trim_case_insensitive")
+        self.assertTrue(session_library["preserve_order"])
+        self.assertTrue(session_library["preserve_pinned_order"])
+        self.assertTrue(session_library["active_archived_views"])
+        self.assertEqual(
+            session_library["restore_action"],
+            "set_archived_false_without_selecting",
+        )
+        self.assertFalse(session_library["server_search_or_pagination"])
+        self.assertTrue(session_library["profile_scoped"])
         event_replay = contract["event_replay_protection"]
         self.assertEqual(
             event_replay["dedup_key_fields"],

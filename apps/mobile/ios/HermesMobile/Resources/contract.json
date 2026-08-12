@@ -93,6 +93,19 @@
       "approval"
     ]
   },
+  "session_library": {
+    "scope": "loaded_sessions_only",
+    "search_fields": ["display_title", "title", "preview", "stored_session_id"],
+    "query_normalization": "trim_case_insensitive",
+    "preserve_order": true,
+    "preserve_pinned_order": true,
+    "active_archived_views": true,
+    "restore_action": "set_archived_false_without_selecting",
+    "no_match_action": "show_empty_state",
+    "clear_query_action": "show_current_view",
+    "server_search_or_pagination": false,
+    "profile_scoped": true
+  },
   "event_replay_protection": {
     "dedup_key_fields": ["stored_session_id", "event_type", "stable_identity"],
     "profile_scope_input": "session_selection_scope",
