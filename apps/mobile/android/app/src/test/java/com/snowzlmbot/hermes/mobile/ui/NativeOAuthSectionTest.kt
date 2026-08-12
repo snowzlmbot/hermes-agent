@@ -2,6 +2,10 @@ package com.snowzlmbot.hermes.mobile.ui
 
 import android.app.Application
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -87,6 +91,9 @@ class NativeOAuthSectionTest {
 
     compose.onNodeWithTag("oauth-discover").assertIsNotEnabled()
     compose.onNodeWithTag("oauth-provider-nous").assertIsNotEnabled()
+    compose.onNodeWithTag("oauth-pending").assert(
+      SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite),
+    )
     compose.onNodeWithTag("oauth-cancel").assertIsDisplayed().performClick()
 
     assertEquals(true, cancelled)
