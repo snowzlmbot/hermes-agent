@@ -22,8 +22,9 @@ final class HermesMobileUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Sessions"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Welcome to Hermes"].exists)
         XCTAssertTrue(app.buttons["Read aloud"].exists)
-        XCTAssertTrue(app.textViews["Message Hermes"].exists)
-        XCTAssertFalse(app.staticTexts["Message Hermes"].exists)
+        let composer = app.textViews["Message Hermes"]
+        XCTAssertTrue(composer.exists)
+        XCTAssertEqual(composer.label, "Message Hermes")
         XCTAssertTrue(app.buttons["Send message"].exists)
         XCTAssertTrue(app.buttons["Attach file"].exists)
 
