@@ -26,6 +26,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
@@ -37,8 +39,6 @@ import androidx.compose.material.icons.filled.PushPin
 
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
@@ -558,7 +558,7 @@ private fun MessageBubble(
         if (!user && message.text.isNotBlank()) {
           TextButton(onClick = { if (isSpeaking) onStopSpeaking() else onSpeak(message.text) }) {
             Icon(
-              if (isSpeaking) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+              if (isSpeaking) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
               contentDescription = null,
             )
             Spacer(Modifier.width(6.dp))
