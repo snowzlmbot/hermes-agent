@@ -8,6 +8,14 @@ struct OnboardingView: View {
     @State private var allowInsecure = false
     @State private var selectedProvider = ""
 
+    private var insecureTransportLayout: AnyLayout {
+        if dynamicTypeSize.isAccessibilitySize {
+            AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+        } else {
+            AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -16,7 +24,7 @@ struct OnboardingView: View {
                         Label(String(localized: "onboarding.title"), systemImage: "bolt.horizontal.circle.fill")
                             .font(.title2.weight(.semibold))
                         Text(String(localized: "onboarding.subtitle"))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.primary)
                     }
                     .padding(.vertical, 8)
                 }
@@ -47,46 +55,34 @@ struct OnboardingView: View {
                     }
                     .padding(.vertical, 4)
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(String(localized: "connection.token"))
-                            .font(.caption.weight(.semibold))
+                    SecureField(
+                        "",
+                        text: $token,
+                        prompt: Text(String(localized: "connection.token"))
                             .foregroundStyle(.primary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityHidden(true)
-                        SecureField("", text: $token)
-                            .padding(.vertical, 8)
-                            .font(.body.weight(.medium))
-                            .foregroundStyle(.primary)
-                            .textContentType(.password)
-                            .privacySensitive()
-                            .accessibilityLabel(String(localized: "connection.token"))
-                            .accessibilityIdentifier("Gateway token")
-                    }
-                    .padding(.vertical, 4)
+                    )
+                    .padding(.vertical, 8)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .textContentType(.password)
+                    .privacySensitive()
+                    .accessibilityLabel(String(localized: "connection.token"))
+                    .accessibilityIdentifier("Gateway token")
 
                     if appModel.allowsInsecureTransport {
-                        if dynamicTypeSize.isAccessibilitySize {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(String(localized: "connection.allow.insecure"))
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.primary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .accessibilityHidden(true)
-                                Toggle("", isOn: $allowInsecure)
-                                    .labelsHidden()
-                                    .accessibilityLabel(String(localized: "connection.allow.insecure"))
-                                    .accessibilityIdentifier("Allow insecure HTTP")
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 4)
-                        } else {
-                            Toggle(isOn: $allowInsecure) {
-                                Text(String(localized: "connection.allow.insecure"))
-                                    .fontWeight(.medium)
-                                    .foregroundStyle(.primary)
-                            }
-                            .accessibilityIdentifier("Allow insecure HTTP")
+                        insecureTransportLayout {
+                            Text(String(localized: "connection.allow.insecure"))
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityHidden(true)
+                            Toggle("", isOn: $allowInsecure)
+                                .labelsHidden()
+                                .accessibilityLabel(String(localized: "connection.allow.insecure"))
+                                .accessibilityIdentifier("Allow insecure HTTP")
                         }
+                        .padding(.vertical, 4)
                     }
                 }
 
@@ -101,7 +97,9 @@ struct OnboardingView: View {
                             systemImage: appModel.isConnecting ? "arrow.triangle.2.circlepath" : "link"
                         )
                         .frame(maxWidth: .infinity)
+                        .foregroundStyle(.primary)
                     }
+                    .tint(.primary)
                     .disabled(appModel.isConnecting)
                     .accessibilityIdentifier("Connect")
                 }
