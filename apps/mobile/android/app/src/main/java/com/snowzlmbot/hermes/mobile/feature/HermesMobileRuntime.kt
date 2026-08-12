@@ -6,6 +6,7 @@ import com.snowzlmbot.hermes.mobile.core.GatewayRestClient
 import com.snowzlmbot.hermes.mobile.core.JsonObjectRpcClient
 import com.snowzlmbot.hermes.mobile.core.ModelCatalog
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
+import com.snowzlmbot.hermes.mobile.platform.VoiceDataUrl
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -49,13 +50,33 @@ internal class RestMobileSessionSource(
   }
 }
 
+internal class RestVoiceGateway(
+  private val client: GatewayRestClient,
+) : VoiceGateway {
+  override suspend fun transcribe(audio: RecordedAudio): String =
+    client.transcribeAudio(VoiceDataUrl.encode(audio.mimeType, audio.bytes), audio.mimeType).transcript
+
+  override suspend fun synthesize(text: String): SynthesizedVoice {
+    val speech = client.speakText(text)
+    val decoded = VoiceDataUrl.decode(speech.dataUrl)
+    return SynthesizedVoice(decoded.mimeType, decoded.bytes)
+  }
+}
+
 internal class HermesMobileRuntime(
   private val rpc: JsonObjectRpcClient,
   private val sessions: MobileSessionSource,
-) : MobileGatewayRuntime {
+  private val voice: VoiceGateway? = null,
+) : MobileGatewayRuntime, VoiceGateway {
   override val events: SharedFlow<com.snowzlmbot.hermes.mobile.core.GatewayEvent> = rpc.events
 
   override suspend fun connect() = rpc.connect()
+
+  override suspend fun transcribe(audio: RecordedAudio): String =
+    voice?.transcribe(audio) ?: error("Voice transcription is unavailable")
+
+  override suspend fun synthesize(text: String): SynthesizedVoice =
+    voice?.synthesize(text) ?: error("Voice playback is unavailable")
 
   override suspend fun listSessions(): List<SessionSummary> = sessions.listSessions()
 

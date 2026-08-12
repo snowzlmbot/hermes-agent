@@ -1,7 +1,6 @@
 package com.snowzlmbot.hermes.mobile.feature
 
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -72,6 +71,19 @@ class VoiceInteractionControllerTest {
   }
 
   @Test
+  fun playbackFailureStopsSpeakingAndSurfacesError() = runTest {
+    val player = FakePlayer()
+    val controller = VoiceInteractionController(FakeRecorder(), FakeVoiceGateway(), player, this)
+
+    controller.speak("answer")
+    runCurrent()
+    player.fail(IllegalStateException("speaker unavailable"))
+
+    assertFalse(controller.state.value.isSpeaking)
+    assertEquals("speaker unavailable", controller.state.value.error)
+  }
+
+  @Test
   fun emptyTranscriptAndEmptySpeechNeverMutateOrCallGateway() = runTest {
     val gateway = FakeVoiceGateway(transcript = "   ")
     val controller = VoiceInteractionController(FakeRecorder(), gateway, FakePlayer(), this)
@@ -87,7 +99,21 @@ class VoiceInteractionControllerTest {
   }
 
   @Test
-  fun closeCancelsRecordingPlaybackAndLateTranscription() = runTest(StandardTestDispatcher(testScheduler)) {
+  fun stoppingSpeechDoesNotCancelAnActiveTranscription() = runTest {
+    val gateway = FakeVoiceGateway(transcript = "kept transcript")
+    val controller = VoiceInteractionController(FakeRecorder(), gateway, FakePlayer(), this)
+
+    controller.startRecording()
+    controller.stopAndTranscribe()
+    controller.stopSpeaking()
+    runCurrent()
+
+    assertEquals(listOf("kept transcript"), controller.transcripts.replayCache)
+    assertFalse(controller.state.value.isTranscribing)
+  }
+
+  @Test
+  fun closeCancelsRecordingPlaybackAndLateTranscription() = runTest {
     val recorder = FakeRecorder()
     val player = FakePlayer()
     val gateway = FakeVoiceGateway(transcript = "late")
@@ -142,20 +168,34 @@ class VoiceInteractionControllerTest {
   private class FakePlayer : VoicePlayer {
     var stopCount = 0
     private var completion: (() -> Unit)? = null
+    private var failure: ((Throwable) -> Unit)? = null
 
-    override fun play(audio: SynthesizedVoice, onComplete: () -> Unit) {
+    override fun play(
+      audio: SynthesizedVoice,
+      onComplete: () -> Unit,
+      onError: (Throwable) -> Unit,
+    ) {
       completion = onComplete
+      failure = onError
     }
 
     override fun stop() {
       stopCount += 1
       completion = null
+      failure = null
     }
-
     fun complete() {
       val current = completion
       completion = null
+      failure = null
       current?.invoke()
+    }
+
+    fun fail(error: Throwable) {
+      val current = failure
+      completion = null
+      failure = null
+      current?.invoke(error)
     }
   }
 }

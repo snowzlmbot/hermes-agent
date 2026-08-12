@@ -19,9 +19,14 @@ import com.snowzlmbot.hermes.mobile.core.SecretValue
 import com.snowzlmbot.hermes.mobile.core.StoredGatewayAuth
 import com.snowzlmbot.hermes.mobile.feature.ChatController
 import com.snowzlmbot.hermes.mobile.feature.EventReplayGuard
+import com.snowzlmbot.hermes.mobile.feature.HermesMobileRuntime
+import com.snowzlmbot.hermes.mobile.feature.VoiceInteractionController
+import com.snowzlmbot.hermes.mobile.feature.VoiceInteractionState
 import com.snowzlmbot.hermes.mobile.feature.AndroidStoredSessionSelectionStore
 import com.snowzlmbot.hermes.mobile.feature.MobileChatUiState
 import com.snowzlmbot.hermes.mobile.platform.AttachmentPayload
+import com.snowzlmbot.hermes.mobile.platform.AndroidVoicePlayer
+import com.snowzlmbot.hermes.mobile.platform.AndroidVoiceRecorder
 import com.snowzlmbot.hermes.mobile.platform.LocalNotificationService
 import com.snowzlmbot.hermes.mobile.platform.NotificationProfileScope
 import com.snowzlmbot.hermes.mobile.platform.NotificationRouteMetadata
@@ -61,7 +66,12 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
   private var replayGuardScope: String? = null
   private var activeNotificationProfileScope: String? = null
   private val mutableState = MutableStateFlow(AppUiState())
+  private val mutableVoiceState = MutableStateFlow(VoiceInteractionState())
+  private val voiceTranscriptChannel = Channel<String>(Channel.BUFFERED)
   private var controller: ChatController? = null
+  private var voiceController: VoiceInteractionController? = null
+  private var voiceStateCollection: Job? = null
+  private var voiceTranscriptCollection: Job? = null
   private var chatCollection: kotlinx.coroutines.Job? = null
   private var connectJob: Job? = null
   private var forgetJob: Job? = null
@@ -88,6 +98,8 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
   }
 
   val state: StateFlow<AppUiState> = mutableState.asStateFlow()
+  val voiceState: StateFlow<VoiceInteractionState> = mutableVoiceState.asStateFlow()
+  val voiceTranscripts = voiceTranscriptChannel.receiveAsFlow()
   val oauthBrowserEvents = oauthBrowserChannel.receiveAsFlow()
 
   init {
@@ -329,6 +341,30 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
     viewModelScope.launch { controller?.send(text) }
   }
 
+  fun startVoiceRecording() {
+    voiceController?.startRecording()
+  }
+
+  fun stopVoiceRecordingAndTranscribe() {
+    voiceController?.stopAndTranscribe()
+  }
+
+  fun speak(text: String) {
+    voiceController?.speak(text)
+  }
+
+  fun stopSpeaking() {
+    voiceController?.stopSpeaking()
+  }
+
+  fun clearVoiceError() {
+    voiceController?.clearError()
+  }
+
+  fun reportVoiceError(message: String) {
+    voiceController?.reportError(message)
+  }
+
   fun stop() {
     viewModelScope.launch { controller?.stop() }
   }
@@ -417,6 +453,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
     forgetJob?.cancel()
     resetOAuthFlow()
     oauthBrowserChannel.close()
+    voiceTranscriptChannel.close()
     controller?.close()
   }
 
@@ -475,8 +512,9 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       replayGuardScope = selectionScope
     }
     val notificationProfileScope = NotificationProfileScope.fromSelectionScope(selectionScope)
+    val runtime = graph.runtime(connection)
     val next = ChatController(
-      runtime = graph.runtime(connection),
+      runtime = runtime,
       scope = viewModelScope,
       selectionStore = AndroidStoredSessionSelectionStore(getApplication<Application>(), selectionScope),
       eventReplayGuard = eventReplayGuard,
@@ -500,6 +538,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       val previous = controller
       installed = true
       controller = next
+      installVoice(runtime)
       activeNotificationProfileScope = notificationProfileScope
       previous?.close()
       chatCollection?.cancel()
@@ -517,7 +556,35 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
     }
   }
 
+  private fun installVoice(runtime: HermesMobileRuntime) {
+    closeVoice()
+    val next = VoiceInteractionController(
+      recorder = AndroidVoiceRecorder(getApplication<Application>()),
+      gateway = runtime,
+      player = AndroidVoicePlayer(getApplication<Application>()),
+      scope = viewModelScope,
+    )
+    voiceController = next
+    voiceStateCollection = viewModelScope.launch {
+      next.state.collect { mutableVoiceState.value = it }
+    }
+    voiceTranscriptCollection = viewModelScope.launch {
+      next.transcripts.collect { voiceTranscriptChannel.send(it) }
+    }
+  }
+
+  private fun closeVoice() {
+    voiceStateCollection?.cancel()
+    voiceTranscriptCollection?.cancel()
+    voiceStateCollection = null
+    voiceTranscriptCollection = null
+    voiceController?.close()
+    voiceController = null
+    mutableVoiceState.value = VoiceInteractionState()
+  }
+
   private fun nextConnectionGeneration(): Long {
+    closeVoice()
     connectionGeneration += 1
     connectJob?.cancel()
     connectJob = null

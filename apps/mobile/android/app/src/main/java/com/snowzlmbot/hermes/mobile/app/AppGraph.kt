@@ -16,6 +16,7 @@ import com.snowzlmbot.hermes.mobile.core.SecretValue
 import com.snowzlmbot.hermes.mobile.core.StoredGatewayAuth
 import com.snowzlmbot.hermes.mobile.feature.HermesMobileRuntime
 import com.snowzlmbot.hermes.mobile.feature.RestMobileSessionSource
+import com.snowzlmbot.hermes.mobile.feature.RestVoiceGateway
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -84,12 +85,14 @@ internal class AppGraph(
     if (connection.profile.authMode == GatewayAuthMode.OAUTH) {
       val auth = authCoordinatorFactory(connection, connections)
       activeAuthCoordinator = auth
+      val rest = auth.restClient()
       return@withLock HermesMobileRuntime(
         rpc = GatewaySocketClient(
           endpoint = endpoint,
           credentialProvider = auth::socketCredential,
         ),
-        sessions = RestMobileSessionSource(auth.restClient()),
+        sessions = RestMobileSessionSource(rest),
+        voice = RestVoiceGateway(rest),
       )
     }
     activeAuthCoordinator = null
@@ -103,6 +106,10 @@ internal class AppGraph(
       endpoint = endpoint,
       credentialProvider = { connection.credential() },
     )
-    HermesMobileRuntime(socket, RestMobileSessionSource(rest))
+    HermesMobileRuntime(
+      rpc = socket,
+      sessions = RestMobileSessionSource(rest),
+      voice = RestVoiceGateway(rest),
+    )
   }
 }

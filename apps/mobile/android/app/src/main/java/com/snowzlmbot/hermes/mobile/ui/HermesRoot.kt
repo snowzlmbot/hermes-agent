@@ -1,5 +1,7 @@
 package com.snowzlmbot.hermes.mobile.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,12 +30,15 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
 
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
@@ -62,6 +67,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,6 +78,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -231,6 +238,7 @@ internal fun NativeOAuthSection(
 private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
   val mobile = state.chat
   val chat = mobile?.chat
+  val voice by viewModel.voiceState.collectAsState()
   val drawerState = rememberDrawerState(DrawerValue.Closed)
   val scope = rememberCoroutineScope()
   val snackbar = remember { SnackbarHostState() }
@@ -246,9 +254,13 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
     }
   }
 
-  LaunchedEffect(state.configurationError, mobile?.error?.message, chat?.error) {
-    val message = state.configurationError ?: mobile?.error?.message ?: chat?.error
-    if (!message.isNullOrBlank()) snackbar.showSnackbar(message)
+  LaunchedEffect(state.configurationError, mobile?.error?.message, chat?.error, voice.error) {
+    val primaryError = state.configurationError ?: mobile?.error?.message ?: chat?.error
+    val message = primaryError ?: voice.error
+    if (!message.isNullOrBlank()) {
+      snackbar.showSnackbar(message)
+      if (primaryError == null && voice.error != null) viewModel.clearVoiceError()
+    }
   }
 
   ModalNavigationDrawer(
@@ -438,12 +450,25 @@ private fun ChatContent(
   onPickAttachment: () -> Unit,
 ) {
   var text by remember { mutableStateOf("") }
+  val voice by viewModel.voiceState.collectAsState()
+  val context = LocalContext.current
+  val microphonePermission = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestPermission(),
+  ) { granted ->
+    if (granted) viewModel.startVoiceRecording()
+    else viewModel.reportVoiceError("Microphone permission is required")
+  }
   val listState = rememberLazyListState()
   LaunchedEffect(chat.messages.size, chat.messages.lastOrNull()?.text) {
     if (chat.messages.isNotEmpty()) listState.animateScrollToItem(chat.messages.lastIndex)
   }
   LaunchedEffect(chat.runtimeSessionId) {
     if (chat.runtimeSessionId != null && modelCatalog.providers.isEmpty()) viewModel.refreshModelOptions()
+  }
+  LaunchedEffect(viewModel) {
+    viewModel.voiceTranscripts.collect { transcript ->
+      text = if (text.isBlank()) transcript else "$text $transcript"
+    }
   }
   Column(modifier.imePadding()) {
     LazyColumn(
@@ -452,7 +477,14 @@ private fun ChatContent(
       contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 16.dp),
       verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-      itemsIndexed(chat.messages, key = { _, item -> item.id }) { _, message -> MessageBubble(message) }
+      itemsIndexed(chat.messages, key = { _, item -> item.id }) { _, message ->
+        MessageBubble(
+          message = message,
+          isSpeaking = voice.isSpeaking,
+          onSpeak = viewModel::speak,
+          onStopSpeaking = viewModel::stopSpeaking,
+        )
+      }
       items(chat.tools, key = { it.id }) { tool -> ToolCard(tool) }
       item { PromptCards(chat, viewModel) }
     }
@@ -474,6 +506,17 @@ private fun ChatContent(
       onSend = { val outgoing = text; text = ""; viewModel.send(outgoing) },
       onStop = viewModel::stop,
       onAttach = onAttach,
+      isRecording = voice.isRecording,
+      isTranscribing = voice.isTranscribing,
+      onRecord = {
+        if (voice.isRecording) {
+          viewModel.stopVoiceRecordingAndTranscribe()
+        } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+          viewModel.startVoiceRecording()
+        } else {
+          microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+      },
     )
   }
   if (showAttachmentMenu) {
@@ -488,7 +531,12 @@ private fun ChatContent(
 }
 
 @Composable
-private fun MessageBubble(message: ChatMessage) {
+private fun MessageBubble(
+  message: ChatMessage,
+  isSpeaking: Boolean,
+  onSpeak: (String) -> Unit,
+  onStopSpeaking: () -> Unit,
+) {
   val user = message.role == MessageRole.USER
   Column(
     Modifier.fillMaxWidth(),
@@ -507,6 +555,16 @@ private fun MessageBubble(message: ChatMessage) {
           Spacer(Modifier.height(8.dp))
         }
         Text(message.text.ifBlank { if (message.status.name == "STREAMING") "Working..." else "" })
+        if (!user && message.text.isNotBlank()) {
+          TextButton(onClick = { if (isSpeaking) onStopSpeaking() else onSpeak(message.text) }) {
+            Icon(
+              if (isSpeaking) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+              contentDescription = null,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(if (isSpeaking) "Stop speaking" else "Speak")
+          }
+        }
         message.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
       }
     }
@@ -596,17 +654,27 @@ private fun Composer(
   onSend: () -> Unit,
   onStop: () -> Unit,
   onAttach: () -> Unit,
+  isRecording: Boolean,
+  isTranscribing: Boolean,
+  onRecord: () -> Unit,
 ) {
   Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth().navigationBarsPadding()) {
     Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom) {
       Box {
         IconButton(onClick = onAttach) { Icon(Icons.Default.AttachFile, contentDescription = "Attach") }
       }
+      IconButton(onClick = onRecord, enabled = !isTranscribing) {
+        Icon(
+          Icons.Default.Mic,
+          contentDescription = if (isRecording) "Stop recording" else "Record voice",
+          tint = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+        )
+      }
       OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = Modifier.weight(1f).testTag("composer"),
-        placeholder = { Text("Message Hermes") },
+        placeholder = { Text(if (isTranscribing) "Transcribing voice…" else "Message Hermes") },
         maxLines = 5,
       )
       Spacer(Modifier.width(4.dp))
