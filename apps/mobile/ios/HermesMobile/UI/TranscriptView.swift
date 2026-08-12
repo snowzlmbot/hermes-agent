@@ -68,7 +68,7 @@ private struct MessageCard: View {
                     systemImage: isUser ? "person.fill" : "sparkles"
                 )
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(isUser ? Color.accentColor : Color.secondary)
+                .foregroundStyle(isUser ? Color.accentColor : Color.primary)
 
                 if !message.reasoning.isEmpty {
                     DisclosureGroup(String(localized: "message.reasoning")) {
@@ -95,6 +95,7 @@ private struct MessageCard: View {
                     }
                     .buttonStyle(.borderless)
                     .font(.footnote)
+                    .tint(.primary)
                 }
             }
             .padding(12)

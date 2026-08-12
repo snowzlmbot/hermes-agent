@@ -20,11 +20,14 @@ struct OnboardingView: View {
                     .padding(.vertical, 8)
                 }
 
-                Section(String(localized: "connection.section")) {
+                Section {
                     TextField(
                         String(localized: "connection.address"),
                         text: $address
                     )
+                    .frame(minHeight: 44, alignment: .leading)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.primary)
                     .textContentType(.URL)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
@@ -32,13 +35,27 @@ struct OnboardingView: View {
                     .accessibilityIdentifier("Gateway address")
 
                     SecureField(String(localized: "connection.token"), text: $token)
+                        .frame(minHeight: 44, alignment: .leading)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
                         .textContentType(.password)
                         .accessibilityIdentifier("Gateway token")
 
                     if appModel.allowsInsecureTransport {
-                        Toggle(String(localized: "connection.allow.insecure"), isOn: $allowInsecure)
-                            .accessibilityIdentifier("Allow insecure HTTP")
+                        Toggle(isOn: $allowInsecure) {
+                            Text(String(localized: "connection.allow.insecure"))
+                                .fontWeight(.medium)
+                                .foregroundStyle(.primary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(minHeight: 44, alignment: .leading)
+                        .accessibilityIdentifier("Allow insecure HTTP")
                     }
+                } header: {
+                    Text(String(localized: "connection.section"))
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .textCase(nil)
                 }
 
                 Section {

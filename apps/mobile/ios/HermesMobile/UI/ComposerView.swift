@@ -30,14 +30,15 @@ struct ComposerView: View {
                 ZStack(alignment: .topLeading) {
                     if text.isEmpty {
                         Text(String(localized: "composer.placeholder"))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.primary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 8)
+                            .fixedSize(horizontal: false, vertical: true)
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
                     TextEditor(text: $text)
-                        .frame(minHeight: 38, maxHeight: 120)
+                        .frame(minHeight: 44, maxHeight: 180)
                         .scrollContentBackground(.hidden)
                         .accessibilityLabel(String(localized: "composer.placeholder"))
                         .accessibilityIdentifier("Message Hermes")
