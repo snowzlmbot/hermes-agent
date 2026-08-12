@@ -63,11 +63,6 @@ struct OnboardingView: View {
                     if appModel.allowsInsecureTransport {
                         Toggle(isOn: $allowInsecure) {
                             Text(String(localized: "connection.allow.insecure"))
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.primary)
-                                .lineLimit(nil)
-                                .multilineTextAlignment(.leading)
-                                .layoutPriority(1)
                         }
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .padding(.vertical, 4)
