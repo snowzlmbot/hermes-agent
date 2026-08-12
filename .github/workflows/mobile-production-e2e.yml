@@ -1,0 +1,66 @@
+name: Mobile Production Gateway E2E
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - hermes-agent-Mobile-app
+    paths:
+      - hermes_cli/dashboard_auth/**
+      - hermes_cli/subcommands/dashboard.py
+      - hermes_cli/web_server.py
+      - tui_gateway/methods_session.py
+      - tests/mobile/test_production_gateway_mobile_e2e.py
+      - tests/hermes_cli/test_dashboard_auth_ws_auth.py
+      - tests/hermes_cli/test_dashboard_auth_ws_tickets.py
+      - .github/workflows/mobile-production-e2e.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-production-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  production-gateway:
+    name: Real production gateway mobile E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "0.9.28"
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Install locked test environment
+        run: >-
+          uv sync --locked --python 3.11
+          --extra all --extra dev --extra anthropic --extra mistral
+          --extra fal --extra modal --extra daytona --extra hindsight
+          --extra parallel-web
+      - name: Run real production gateway E2E
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+        run: >-
+          uv run python -m pytest
+          tests/mobile/test_production_gateway_mobile_e2e.py
+          -m integration
+          -q --tb=short
+      - name: Verify production WebSocket ticket contract
+        run: >-
+          uv run python -m pytest
+          tests/hermes_cli/test_dashboard_auth_ws_auth.py
+          tests/hermes_cli/test_dashboard_auth_ws_tickets.py
+          -q --tb=short
