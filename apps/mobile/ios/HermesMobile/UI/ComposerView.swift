@@ -34,6 +34,7 @@ struct ComposerView: View {
                             .padding(.horizontal, 5)
                             .padding(.vertical, 8)
                             .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                     TextEditor(text: $text)
                         .frame(minHeight: 38, maxHeight: 120)
