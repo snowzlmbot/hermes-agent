@@ -2,19 +2,10 @@ import SwiftUI
 
 struct OnboardingView: View {
     @Environment(AppModel.self) private var appModel
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var address = "https://"
     @State private var token = ""
     @State private var allowInsecure = false
     @State private var selectedProvider = ""
-
-    private var insecureTransportLayout: AnyLayout {
-        if dynamicTypeSize.isAccessibilitySize {
-            AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-        } else {
-            AnyLayout(HStackLayout(alignment: .center, spacing: 12))
-        }
-    }
 
     var body: some View {
         NavigationStack {
@@ -70,21 +61,17 @@ struct OnboardingView: View {
                     .accessibilityIdentifier("Gateway token")
 
                     if appModel.allowsInsecureTransport {
-                        insecureTransportLayout {
+                        Toggle(isOn: $allowInsecure) {
                             Text(String(localized: "connection.allow.insecure"))
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(.primary)
                                 .lineLimit(nil)
                                 .multilineTextAlignment(.leading)
                                 .layoutPriority(1)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .accessibilityHidden(true)
-                            Toggle("", isOn: $allowInsecure)
-                                .labelsHidden()
-                                .accessibilityLabel(String(localized: "connection.allow.insecure"))
-                                .accessibilityIdentifier("Allow insecure HTTP")
                         }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .padding(.vertical, 4)
+                        .accessibilityIdentifier("Allow insecure HTTP")
                     }
                 }
 
