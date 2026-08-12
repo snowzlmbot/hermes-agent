@@ -251,6 +251,7 @@ public struct MobileContract: Decodable, Sendable {
     public let frames: Frames
     public let notificationRouting: NotificationRouting
     public let eventReplayProtection: EventReplayProtection
+    public let sessionLibrary: SessionLibrary
 
     public struct EventReplayProtection: Decodable, Sendable {
         public let capacity: Int
@@ -304,6 +305,33 @@ public struct MobileContract: Decodable, Sendable {
         }
     }
 
+    public struct SessionLibrary: Decodable, Sendable {
+        public let scope: String
+        public let searchFields: [String]
+        public let queryNormalization: String
+        public let preserveOrder: Bool
+        public let preservePinnedOrder: Bool
+        public let activeArchivedViews: Bool
+        public let restoreAction: String
+        public let noMatchAction: String
+        public let clearQueryAction: String
+        public let serverSearchOrPagination: Bool
+        public let profileScoped: Bool
+        enum CodingKeys: String, CodingKey {
+            case scope
+            case searchFields = "search_fields"
+            case queryNormalization = "query_normalization"
+            case preserveOrder = "preserve_order"
+            case preservePinnedOrder = "preserve_pinned_order"
+            case activeArchivedViews = "active_archived_views"
+            case restoreAction = "restore_action"
+            case noMatchAction = "no_match_action"
+            case clearQueryAction = "clear_query_action"
+            case serverSearchOrPagination = "server_search_or_pagination"
+            case profileScoped = "profile_scoped"
+        }
+    }
+
     public struct Frames: Decodable, Sendable {
         public let request: [String: JSONValue]
         public let event: [String: JSONValue]
@@ -321,6 +349,7 @@ public struct MobileContract: Decodable, Sendable {
         case frames
         case notificationRouting = "notification_routing"
         case eventReplayProtection = "event_replay_protection"
+        case sessionLibrary = "session_library"
     }
 
     public static func loadBundled(bundle: Bundle = .main) throws -> MobileContract {
