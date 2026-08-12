@@ -2,7 +2,7 @@ import XCTest
 
 @MainActor
 final class HermesMobileUITests: XCTestCase {
-    func testSetupScreenExposesAccessibleConnectionControls() {
+    func testSetupScreenExposesAccessibleConnectionControls() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-smoke"]
         app.launch()
@@ -12,9 +12,10 @@ final class HermesMobileUITests: XCTestCase {
         XCTAssertTrue(app.secureTextFields["Gateway token"].exists)
         XCTAssertTrue(app.buttons["Connect"].exists)
         XCTAssertTrue(app.switches["Allow insecure HTTP"].exists)
+        try app.performAccessibilityAudit()
     }
 
-    func testDemoModeShowsAdaptiveSessionAndComposerSurfaces() {
+    func testDemoModeShowsAdaptiveSessionAndComposerSurfaces() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-demo"]
         app.launch()
@@ -27,6 +28,7 @@ final class HermesMobileUITests: XCTestCase {
         XCTAssertEqual(composer.label, "Message Hermes")
         XCTAssertTrue(app.buttons["Send message"].exists)
         XCTAssertTrue(app.buttons["Attach file"].exists)
+        try app.performAccessibilityAudit()
 
         let controls = app.descendants(matching: .any)["Model controls"]
         XCTAssertTrue(controls.waitForExistence(timeout: 3))
