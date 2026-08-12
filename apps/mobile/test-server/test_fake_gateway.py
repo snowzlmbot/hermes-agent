@@ -370,6 +370,10 @@ class FakeGatewayContractTests(unittest.TestCase):
         self.assertEqual(event_replay["profile_scope_input"], "session_selection_scope")
         self.assertEqual(event_replay["payload_stable_identity_fields"], ["event_id", "sequence"])
         self.assertEqual(event_replay["stable_identity_value_types"], ["string", "integer"])
+        self.assertEqual(event_replay["current_gateway_event_identity"], "not_uniformly_available")
+        self.assertFalse(event_replay["current_gateway_replay_cursor"])
+        self.assertEqual(event_replay["safe_deduplication_scope"], "stable_identity_only")
+        self.assertFalse(event_replay["exactly_once_guarantee"])
         self.assertEqual(event_replay["missing_stable_identity_action"], "process")
         self.assertEqual(
             event_replay["duplicate_action"],

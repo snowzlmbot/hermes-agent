@@ -257,6 +257,10 @@ public struct MobileContract: Decodable, Sendable {
         public let profileScopeInput: String
         public let payloadStableIdentityFields: [String]
         public let stableIdentityValueTypes: [String]
+        public let currentGatewayEventIdentity: String
+        public let currentGatewayReplayCursor: Bool
+        public let safeDeduplicationScope: String
+        public let exactlyOnceGuarantee: Bool
         public let missingStableIdentityAction: String
         public let duplicateAction: String
         public let sameProfileReconnectAction: String
@@ -267,6 +271,10 @@ public struct MobileContract: Decodable, Sendable {
             case profileScopeInput = "profile_scope_input"
             case payloadStableIdentityFields = "payload_stable_identity_fields"
             case stableIdentityValueTypes = "stable_identity_value_types"
+            case currentGatewayEventIdentity = "current_gateway_event_identity"
+            case currentGatewayReplayCursor = "current_gateway_replay_cursor"
+            case safeDeduplicationScope = "safe_deduplication_scope"
+            case exactlyOnceGuarantee = "exactly_once_guarantee"
             case missingStableIdentityAction = "missing_stable_identity_action"
             case duplicateAction = "duplicate_action"
             case sameProfileReconnectAction = "same_profile_reconnect_action"
