@@ -54,13 +54,13 @@ jobs:
           OPENAI_API_KEY: ""
           NOUS_API_KEY: ""
         run: >-
-          uv run python -m pytest
+          scripts/run_tests.sh
           tests/mobile/test_production_gateway_mobile_e2e.py
           -m integration
           -q --tb=short
       - name: Verify production WebSocket ticket contract
         run: >-
-          uv run python -m pytest
+          scripts/run_tests.sh
           tests/hermes_cli/test_dashboard_auth_ws_auth.py
           tests/hermes_cli/test_dashboard_auth_ws_tickets.py
           -q --tb=short
