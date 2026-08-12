@@ -27,6 +27,13 @@ class NativeOAuthLoginTest {
   }
 
   @Test
+  fun securePolicyRejectsLoopbackOAuthBeforeNetwork() = runBlocking {
+    val result = runCatching { NativeOAuthLogin().discover(server.url("/").toString()) }
+    assertTrue(result.exceptionOrNull() is NativeAuthException)
+    assertEquals(0, server.requestCount)
+  }
+
+  @Test
   fun discoversProviderAndCompletesRegisteredCallbackWithoutPersistingPkceSecrets() = runBlocking {
     server.enqueue(
       MockResponse().setBody(
@@ -43,7 +50,7 @@ class NativeOAuthLoginTest {
         """{"access_token":"access-private","refresh_token":"refresh-private","expires_at":4102444800,"provider":"nous","user_id":"user-1"}""",
       ),
     )
-    val login = NativeOAuthLogin()
+    val login = NativeOAuthLogin(allowInsecureLoopbackForTesting = true)
 
     val discovery = login.discover(server.url("/gateway/").toString())
     assertEquals(listOf(NativeOAuthProvider("nous", "Nous Research")), discovery.providers)
@@ -100,7 +107,7 @@ class NativeOAuthLoginTest {
         """{"providers":[{"name":"nous","display_name":"Nous Research","supports_password":false}]}""",
       ),
     )
-    val login = NativeOAuthLogin()
+    val login = NativeOAuthLogin(allowInsecureLoopbackForTesting = true)
     val discovery = login.discover(server.url("/").toString())
 
     assertThrows(NativeAuthException::class.java) {

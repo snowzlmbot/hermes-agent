@@ -71,12 +71,15 @@ interface CredentialStore {
   suspend fun clear()
 }
 
-class GatewayProfileRepository(
+class GatewayProfileRepository internal constructor(
   private val profileStore: ProfileStore,
   private val credentialStore: CredentialStore,
+  private val allowInsecureTransport: Boolean = false,
+  private val allowInsecureOAuthForTesting: Boolean = false,
 ) {
   suspend fun load(): GatewayConnection? {
     val profile = profileStore.load() ?: return null
+    validate(profile)
     val auth = credentialStore.load() ?: return null
     return GatewayConnection(profile, normalizeLoadedAuth(profile.authMode, auth))
   }
@@ -86,7 +89,7 @@ class GatewayProfileRepository(
   }
 
   suspend fun save(profile: GatewayProfile, auth: StoredGatewayAuth) {
-    GatewayEndpoint.parse(profile.address, profile.allowInsecure)
+    validate(profile)
     require(auth.matches(profile.authMode)) { "Stored credential does not match the gateway auth mode" }
     credentialStore.save(auth)
     profileStore.save(profile)
@@ -95,6 +98,21 @@ class GatewayProfileRepository(
   suspend fun clear() {
     credentialStore.clear()
     profileStore.clear()
+  }
+
+  private fun validate(profile: GatewayProfile) {
+    val buildAllowsInsecure = when (profile.authMode) {
+      GatewayAuthMode.OAUTH -> allowInsecureOAuthForTesting
+      GatewayAuthMode.TOKEN, GatewayAuthMode.TICKET -> allowInsecureTransport
+    }
+    val allowInsecure = buildAllowsInsecure && profile.allowInsecure
+    if (profile.allowInsecure && !allowInsecure) {
+      throw InsecureEndpointException("Cleartext capability is unavailable")
+    }
+    val endpoint = GatewayEndpoint.parse(profile.address, allowInsecure)
+    if (!endpoint.httpBaseUrl.isHttps && !allowInsecure) {
+      throw InsecureEndpointException("Cleartext gateways are disabled")
+    }
   }
 
   private fun StoredGatewayAuth.matches(mode: GatewayAuthMode): Boolean = when (mode) {

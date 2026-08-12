@@ -12,36 +12,23 @@
             <key>CFBundleTypeRole</key>
             <string>Editor</string>
             <key>CFBundleURLSchemes</key>
-            <array>
-                <string>com.snowzlmbot.hermes.mobile</string>
-            </array>
+            <array><string>com.snowzlmbot.hermes.mobile</string></array>
         </dict>
     </array>
-    <key>CFBundleExecutable</key>
-    <string>$(EXECUTABLE_NAME)</string>
-    <key>CFBundleIdentifier</key>
-    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>$(PRODUCT_NAME)</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>$(MARKETING_VERSION)</string>
-    <key>CFBundleVersion</key>
-    <string>$(CURRENT_PROJECT_VERSION)</string>
-    <key>ITSAppUsesNonExemptEncryption</key>
-    <false/>
-    <key>LSRequiresIPhoneOS</key>
-    <true/>
+    <key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+    <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>ITSAppUsesNonExemptEncryption</key><false/>
+    <key>LSRequiresIPhoneOS</key><true/>
     <key>NSAppTransportSecurity</key>
     <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <false/>
+        <key>NSAllowsArbitraryLoads</key><true/>
     </dict>
-    <key>HermesAllowsInsecureTransport</key>
-    <false/>
+    <key>HermesAllowsInsecureTransport</key><true/>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Hermes connects to the gateway you choose on your local network.</string>
     <key>NSMicrophoneUsageDescription</key>
@@ -49,16 +36,10 @@
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Hermes lets you choose photos to attach to a conversation.</string>
     <key>UIApplicationSceneManifest</key>
-    <dict>
-        <key>UIApplicationSupportsMultipleScenes</key>
-        <false/>
-    </dict>
-    <key>UIApplicationSupportsIndirectInputEvents</key>
-    <true/>
-    <key>UILaunchScreen</key>
-    <dict/>
-    <key>UIRequiresFullScreen</key>
-    <false/>
+    <dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
+    <key>UIApplicationSupportsIndirectInputEvents</key><true/>
+    <key>UILaunchScreen</key><dict/>
+    <key>UIRequiresFullScreen</key><false/>
     <key>UISupportedInterfaceOrientations</key>
     <array>
         <string>UIInterfaceOrientationPortrait</string>

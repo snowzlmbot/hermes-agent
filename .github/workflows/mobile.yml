@@ -6,12 +6,12 @@ on:
     branches:
       - hermes-agent-Mobile-app
     paths:
-      - apps/mobile/ios/**
-      - .github/workflows/mobile.yml
+      - apps/mobile/**
+      - .github/workflows/mobile*.yml
   pull_request:
     paths:
-      - apps/mobile/ios/**
-      - .github/workflows/mobile.yml
+      - apps/mobile/**
+      - .github/workflows/mobile*.yml
 
 permissions:
   contents: read
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   ios:
-    name: iOS simulator tests
+    name: iOS simulator and release verification
     runs-on: macos-26
     timeout-minutes: 35
     steps:
@@ -84,6 +84,13 @@ jobs:
             -resultBundlePath "$RUNNER_TEMP/HermesMobile.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             test
+      - name: Verify debug transport policy
+        run: python3 apps/mobile/test-server/verify_ios_transport_plist.py Debug "$RUNNER_TEMP/HermesMobileDerivedData/Build/Products/Debug-iphonesimulator/HermesMobile.app/Info.plist"
+      - name: Build release app
+        working-directory: apps/mobile/ios
+        run: xcodebuild -project HermesMobile.xcodeproj -scheme HermesMobile -configuration Release -sdk iphonesimulator -derivedDataPath "$RUNNER_TEMP/HermesMobileRelease" CODE_SIGNING_ALLOWED=NO build
+      - name: Verify release transport policy
+        run: python3 apps/mobile/test-server/verify_ios_transport_plist.py Release "$RUNNER_TEMP/HermesMobileRelease/Build/Products/Release-iphonesimulator/HermesMobile.app/Info.plist"
       - name: Upload iOS result bundle
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
@@ -92,5 +99,6 @@ jobs:
           path: |
             ${{ runner.temp }}/HermesMobile.xcresult
             ${{ runner.temp }}/HermesMobileDerivedData/Build/Products/Debug-iphonesimulator/HermesMobile.app
+            ${{ runner.temp }}/HermesMobileRelease/Build/Products/Release-iphonesimulator/HermesMobile.app
           if-no-files-found: warn
           retention-days: 14

@@ -18,9 +18,14 @@ class PendingNativeOAuth internal constructor(
     "PendingNativeOAuth(provider=$provider, authorizationUrl=REDACTED, pkce=REDACTED)"
 }
 
-class NativeOAuthLogin {
+class NativeOAuthLogin internal constructor(
+  private val allowInsecureLoopbackForTesting: Boolean = false,
+) {
   suspend fun discover(address: String): NativeOAuthDiscovery {
     val endpoint = GatewayEndpoint.parse(address)
+    if (!endpoint.httpBaseUrl.isHttps && !allowInsecureLoopbackForTesting) {
+      throw NativeAuthException("OAuth requires HTTPS in this build")
+    }
     val client = GatewayRestClient(endpoint)
     val status = client.status()
     if (status.loginStrategy != GatewayLoginStrategy.NATIVE_OAUTH) {

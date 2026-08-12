@@ -103,6 +103,7 @@ private extension StoredGatewayAuth {
 public enum CredentialError: Error, Equatable, Sendable {
     case emptyToken
     case invalidEndpoint
+    case authModeMismatch
     case keychainFailure(OSStatusCode)
 }
 

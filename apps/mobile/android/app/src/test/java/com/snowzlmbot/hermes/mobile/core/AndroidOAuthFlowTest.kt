@@ -58,7 +58,11 @@ class AndroidOAuthFlowTest {
   fun refreshesBeforeMintingSingleUseWebSocketTicket() = runBlocking {
     server.enqueue(MockResponse().setBody("""{"access_token":"new-access","refresh_token":"new-refresh","expires_at":20000,"provider":"nous","user_id":"user-1"}"""))
     server.enqueue(MockResponse().setBody("""{"ticket":"fresh-ticket"}"""))
-    val repository = GatewayProfileRepository(FakeProfileStore(), FakeCredentialStore())
+    val repository = GatewayProfileRepository(
+      FakeProfileStore(),
+      FakeCredentialStore(),
+      allowInsecureOAuthForTesting = true,
+    )
     val profile = GatewayProfile(server.url("/").toString(), GatewayAuthMode.OAUTH, true)
     repository.save(profile, StoredGatewayAuth.OAuth(tokens("old-access", "old-refresh", 9_000)))
     val coordinator = GatewayAuthCoordinator(

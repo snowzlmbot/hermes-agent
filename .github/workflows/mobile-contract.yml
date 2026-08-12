@@ -1,4 +1,4 @@
-name: Mobile Protocol Contract
+name: Mobile Contract
 
 on:
   workflow_dispatch:
@@ -6,10 +6,12 @@ on:
     branches:
       - hermes-agent-Mobile-app
     paths:
-      - apps/mobile/protocol/**
-      - apps/mobile/test-server/**
-      - apps/mobile/scripts/**
-      - .github/workflows/mobile-contract.yml
+      - apps/mobile/**
+      - .github/workflows/mobile*.yml
+  pull_request:
+    paths:
+      - apps/mobile/**
+      - .github/workflows/mobile*.yml
 
 permissions:
   contents: read
@@ -20,7 +22,7 @@ concurrency:
 
 jobs:
   contract:
-    name: Shared mobile protocol contract
+    name: Shared mobile contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -30,3 +32,9 @@ jobs:
           persist-credentials: false
       - name: Verify contract fixture
         run: bash apps/mobile/scripts/verify.sh --contract-only
+      - name: Verify source transport policies
+        run: |
+          python3 apps/mobile/test-server/test_transport_security.py
+          python3 apps/mobile/test-server/verify_ios_transport_plist.py Release apps/mobile/ios/HermesMobile/Resources/Info.plist
+          python3 apps/mobile/test-server/verify_ios_transport_plist.py Debug apps/mobile/ios/HermesMobile/Resources/Info-Debug.plist
+          python3 apps/mobile/test-server/verify_ios_plist_parity.py apps/mobile/ios/HermesMobile/Resources/Info.plist apps/mobile/ios/HermesMobile/Resources/Info-Debug.plist

@@ -44,6 +44,10 @@ public final class AppModel {
         pendingNotificationRoutes.count
     }
 
+    public var allowsInsecureTransport: Bool {
+        dependencies.allowsInsecureTransport
+    }
+
     public init(dependencies: AppDependencies = .live) {
         self.dependencies = dependencies
     }
@@ -79,11 +83,22 @@ public final class AppModel {
         defer { isConnecting = false }
 
         do {
-            let endpoint = try GatewayEndpoint(rawValue: address, allowInsecureRemote: allowInsecure)
+            if allowInsecure && !dependencies.allowsInsecureTransport {
+                throw GatewayEndpointError.insecureRemoteEndpoint
+            }
+            let allowCleartext = dependencies.allowsInsecureTransport && allowInsecure
+            let endpoint = try GatewayEndpoint(rawValue: address, allowInsecureRemote: allowCleartext)
+            if endpoint.baseURL.scheme != "https" && !allowCleartext {
+                throw GatewayEndpointError.insecureRemoteEndpoint
+            }
             let status = try await GatewayRESTClient.status(endpoint: endpoint, session: dependencies.urlSession)
             let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanToken.isEmpty else {
                 if status.authRequired {
+                    guard endpoint.baseURL.scheme == "https" else {
+                        errorMessage = String(localized: "error.oauth.unavailable")
+                        return
+                    }
                     oauthCapability = status.nativeOAuthCapability
                     if status.nativeOAuthCapability.supportsASWebAuthenticationSessionCallback {
                         oauthProviders = try await GatewayRESTClient.nativeOAuthProviders(
@@ -100,7 +115,7 @@ public final class AppModel {
                 name: String(localized: "profile.default.name"),
                 endpoint: endpoint.baseURL.absoluteString,
                 authMode: .token,
-                allowInsecure: allowInsecure
+                allowInsecure: allowCleartext
             )
             let credentials = try GatewayCredentials(endpoint: profile.endpoint, token: cleanToken)
             try await dependencies.profileRepository.save(profile: profile, credentials: credentials)
@@ -120,7 +135,13 @@ public final class AppModel {
 
         do {
             let endpoint = try GatewayEndpoint(rawValue: address)
-            let status = try await GatewayRESTClient.status(endpoint: endpoint, session: dependencies.urlSession)
+            if endpoint.baseURL.scheme != "https" {
+                throw GatewayEndpointError.insecureRemoteEndpoint
+            }
+            let status = try await GatewayRESTClient.status(
+                endpoint: endpoint,
+                session: dependencies.urlSession
+            )
             let capability = status.nativeOAuthCapability
             oauthCapability = capability
             guard capability.supportsASWebAuthenticationSessionCallback else {
@@ -681,7 +702,7 @@ public final class AppModel {
 
     private func prepareDemo() {
         do {
-            let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1")
+            let endpoint = try GatewayEndpoint(rawValue: "https://127.0.0.1")
             let transport = HermesGatewayTransport(
                 endpoint: endpoint,
                 auth: .token("demo"),

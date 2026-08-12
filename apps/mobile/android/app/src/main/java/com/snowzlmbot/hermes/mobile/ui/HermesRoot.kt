@@ -85,6 +85,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.snowzlmbot.hermes.mobile.BuildConfig
 import com.snowzlmbot.hermes.mobile.R
 import com.snowzlmbot.hermes.mobile.app.AppScreen
 import com.snowzlmbot.hermes.mobile.app.AppUiState
@@ -157,10 +158,12 @@ private fun OnboardingScreen(state: AppUiState, viewModel: HermesAppViewModel) {
         visualTransformation = PasswordVisualTransformation(),
         modifier = Modifier.fillMaxWidth().testTag("gateway-token"),
       )
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        androidx.compose.material3.Switch(checked = allowInsecure, onCheckedChange = { allowInsecure = it })
-        Spacer(Modifier.width(8.dp))
-        Text("Allow cleartext for this gateway")
+      if (BuildConfig.ALLOW_INSECURE_TRANSPORT) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          androidx.compose.material3.Switch(checked = allowInsecure, onCheckedChange = { allowInsecure = it })
+          Spacer(Modifier.width(8.dp))
+          Text("Allow cleartext for this gateway")
+        }
       }
       state.configurationError?.let {
         Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("configuration-error"))

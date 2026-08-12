@@ -8,6 +8,7 @@ on:
       - mobile-production-e2e-ci
       - mobile-session-library-ci
     paths:
+      - apps/mobile/**
       - hermes_cli/dashboard_auth/**
       - hermes_cli/subcommands/dashboard.py
       - hermes_cli/web_server.py
@@ -15,7 +16,18 @@ on:
       - tests/mobile/test_production_gateway_mobile_e2e.py
       - tests/hermes_cli/test_dashboard_auth_ws_auth.py
       - tests/hermes_cli/test_dashboard_auth_ws_tickets.py
-      - .github/workflows/mobile-production-e2e.yml
+      - .github/workflows/mobile*.yml
+  pull_request:
+    paths:
+      - apps/mobile/**
+      - hermes_cli/dashboard_auth/**
+      - hermes_cli/subcommands/dashboard.py
+      - hermes_cli/web_server.py
+      - tui_gateway/methods_session.py
+      - tests/mobile/test_production_gateway_mobile_e2e.py
+      - tests/hermes_cli/test_dashboard_auth_ws_auth.py
+      - tests/hermes_cli/test_dashboard_auth_ws_tickets.py
+      - .github/workflows/mobile*.yml
 
 permissions:
   contents: read

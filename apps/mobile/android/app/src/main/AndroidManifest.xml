@@ -14,7 +14,7 @@
     android:label="@string/app_name"
     android:supportsRtl="true"
     android:theme="@style/Theme.Hermes"
-    android:usesCleartextTraffic="true"
+    android:usesCleartextTraffic="false"
     tools:ignore="UnusedAttribute">
     <activity
       android:name=".MainActivity"

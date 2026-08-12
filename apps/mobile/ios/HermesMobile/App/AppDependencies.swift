@@ -6,30 +6,38 @@ public struct AppDependencies: Sendable {
     public let attachmentImporter: AttachmentImportService
     public let socketFactory: HermesGatewayTransport.SocketFactory
     public let urlSession: URLSession
+    public let allowsInsecureTransport: Bool
 
     public init(
         profileRepository: GatewayProfileRepository,
         notificationService: any NotificationScheduling,
         attachmentImporter: AttachmentImportService,
         socketFactory: @escaping HermesGatewayTransport.SocketFactory = { URLSessionGatewaySocket(url: $0) },
-        urlSession: URLSession = .shared
+        urlSession: URLSession = .shared,
+        allowsInsecureTransport: Bool = false
     ) {
         self.profileRepository = profileRepository
         self.notificationService = notificationService
         self.attachmentImporter = attachmentImporter
         self.socketFactory = socketFactory
         self.urlSession = urlSession
+        self.allowsInsecureTransport = allowsInsecureTransport
     }
 
     public static var live: AppDependencies {
-        AppDependencies(
+        let allowsInsecureTransport = Bundle.main.object(
+            forInfoDictionaryKey: "HermesAllowsInsecureTransport"
+        ) as? Bool == true
+        return AppDependencies(
             profileRepository: GatewayProfileRepository(
                 profileStore: UserDefaultsGatewayProfileStore(),
                 credentialStore: KeychainCredentialStore(),
-                sessionSelectionStore: UserDefaultsStoredSessionSelectionStore()
+                sessionSelectionStore: UserDefaultsStoredSessionSelectionStore(),
+                allowsInsecureTransport: allowsInsecureTransport
             ),
             notificationService: LocalNotificationService(),
-            attachmentImporter: AttachmentImportService()
+            attachmentImporter: AttachmentImportService(),
+            allowsInsecureTransport: allowsInsecureTransport
         )
     }
 }

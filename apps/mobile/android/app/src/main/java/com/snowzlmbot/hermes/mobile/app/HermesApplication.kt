@@ -1,6 +1,7 @@
 package com.snowzlmbot.hermes.mobile.app
 
 import android.app.Application
+import com.snowzlmbot.hermes.mobile.BuildConfig
 import com.snowzlmbot.hermes.mobile.core.AndroidCredentialStore
 import com.snowzlmbot.hermes.mobile.core.AndroidProfileStore
 import com.snowzlmbot.hermes.mobile.core.GatewayProfileRepository
@@ -17,6 +18,7 @@ class HermesApplication : Application() {
       GatewayProfileRepository(
         profileStore = AndroidProfileStore(this),
         credentialStore = AndroidCredentialStore(this),
+        allowInsecureTransport = BuildConfig.ALLOW_INSECURE_TRANSPORT,
       ),
     )
   }

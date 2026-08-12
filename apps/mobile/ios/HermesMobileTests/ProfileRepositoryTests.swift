@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import HermesMobile
 
@@ -18,6 +19,71 @@ final class ProfileRepositoryTests: XCTestCase {
         XCTAssertEqual(connection?.credentials, secret)
         XCTAssertEqual(storedProfiles, [profile])
         XCTAssertEqual(storedCredentials, secret)
+    }
+
+    func testSecureOnlyPolicyRejectsSavingCleartextProfile() async throws {
+        let profiles = InMemoryGatewayProfileStore()
+        let credentials = InMemoryCredentialStore()
+        let repository = GatewayProfileRepository(
+            profileStore: profiles,
+            credentialStore: credentials,
+            allowsInsecureTransport: false
+        )
+        let profile = GatewayProfile(endpoint: "http://127.0.0.1:8765", authMode: .token, allowInsecure: true)
+        do {
+            try await repository.save(profile: profile, credentials: GatewayCredentials(token: "token"))
+            XCTFail("Expected cleartext rejection")
+        } catch {
+            XCTAssertEqual(error as? GatewayEndpointError, .insecureRemoteEndpoint)
+        }
+        let legacy = GatewayProfile(endpoint: "https://gateway.example", authMode: .token, allowInsecure: true)
+        do {
+            try await repository.save(profile: legacy, credentials: GatewayCredentials(token: "token"))
+            XCTFail("Expected legacy capability rejection")
+        } catch {
+            XCTAssertEqual(error as? GatewayEndpointError, .insecureRemoteEndpoint)
+        }
+        let storedProfiles = try await profiles.load()
+        let storedCredentials = try await credentials.load()
+        XCTAssertTrue(storedProfiles.isEmpty)
+        XCTAssertNil(storedCredentials)
+    }
+
+    func testSecureOnlyPolicyRejectsLoadedCleartextProfile() async throws {
+        let profile = GatewayProfile(endpoint: "http://gateway.local", authMode: .token, allowInsecure: true)
+        let credentials = InMemoryCredentialStore()
+        try await credentials.save(GatewayCredentials(token: "token"))
+        let repository = GatewayProfileRepository(
+            profileStore: InMemoryGatewayProfileStore(profiles: [profile]),
+            credentialStore: credentials,
+            allowsInsecureTransport: false
+        )
+        do {
+            _ = try await repository.load()
+            XCTFail("Expected cleartext rejection")
+        } catch {
+            XCTAssertEqual(error as? GatewayEndpointError, .insecureRemoteEndpoint)
+        }
+    }
+
+    func testDebugPolicyAllowsExplicitCleartextProfile() async throws {
+        let profiles = InMemoryGatewayProfileStore()
+        let repository = GatewayProfileRepository(
+            profileStore: profiles,
+            credentialStore: InMemoryCredentialStore(),
+            allowsInsecureTransport: true
+        )
+        let denied = GatewayProfile(endpoint: "http://127.0.0.1", authMode: .token)
+        do {
+            try await repository.save(profile: denied, credentials: GatewayCredentials(token: "token"))
+            XCTFail("Expected explicit consent")
+        } catch {
+            XCTAssertEqual(error as? GatewayEndpointError, .insecureRemoteEndpoint)
+        }
+        let profile = GatewayProfile(endpoint: "http://gateway.local", authMode: .token, allowInsecure: true)
+        try await repository.save(profile: profile, credentials: GatewayCredentials(token: "token"))
+        let stored = try await profiles.load()
+        XCTAssertEqual(stored, [profile])
     }
 
     func testClearingRepositoryRemovesMetadataAndCredential() async throws {
@@ -94,6 +160,100 @@ final class ProfileRepositoryTests: XCTestCase {
         )
     }
 
+    func testOAuthProfileGuardsRunBeforeCredentialAccess() async throws {
+        let oauthProfile = GatewayProfile(
+            endpoint: "http://127.0.0.1",
+            authMode: .oauth,
+            allowInsecure: true
+        )
+        let credentials = CountingCredentialStore()
+        let repository = GatewayProfileRepository(
+            profileStore: InMemoryGatewayProfileStore(profiles: [oauthProfile]),
+            credentialStore: credentials,
+            allowsInsecureTransport: true
+        )
+        do {
+            _ = try await repository.load()
+            XCTFail("Expected OAuth cleartext rejection")
+        } catch {
+            XCTAssertEqual(error as? GatewayEndpointError, .insecureRemoteEndpoint)
+        }
+        let loadCount = await credentials.loadCount
+        XCTAssertEqual(loadCount, 0)
+        let tokens = NativeTokenSet(
+            accessToken: "access",
+            refreshToken: "refresh",
+            expiresAt: 4_102_444_800,
+            provider: "provider"
+        )
+        let tokenProfile = GatewayProfile(endpoint: "https://gateway.example", authMode: .token)
+        do {
+            try await repository.save(
+                profile: tokenProfile,
+                credentials: .oauth(tokens, endpoint: tokenProfile.endpoint)
+            )
+            XCTFail("Expected auth mode mismatch")
+        } catch {
+            XCTAssertEqual(error as? CredentialError, .authModeMismatch)
+        }
+        let saveCount = await credentials.saveCount
+        XCTAssertEqual(saveCount, 0)
+        let mismatchedCredentials = InMemoryCredentialStore()
+        try await mismatchedCredentials.save(.oauth(tokens, endpoint: tokenProfile.endpoint))
+        let mismatchRepository = GatewayProfileRepository(
+            profileStore: InMemoryGatewayProfileStore(profiles: [tokenProfile]),
+            credentialStore: mismatchedCredentials
+        )
+        do {
+            _ = try await mismatchRepository.load()
+            XCTFail("Expected stored auth mode mismatch")
+        } catch {
+            XCTAssertEqual(error as? CredentialError, .authModeMismatch)
+        }
+        let validCredentials = InMemoryCredentialStore()
+        let validRepository = GatewayProfileRepository(
+            profileStore: InMemoryGatewayProfileStore(),
+            credentialStore: validCredentials
+        )
+        let secureOAuth = GatewayProfile(endpoint: "https://gateway.example", authMode: .oauth)
+        let secureCredentials = GatewayCredentials.oauth(tokens, endpoint: secureOAuth.endpoint)
+        try await validRepository.save(profile: secureOAuth, credentials: secureCredentials)
+        let restored = try await validRepository.load()
+        XCTAssertEqual(restored?.profile, secureOAuth)
+        XCTAssertEqual(restored?.credentials, secureCredentials)
+    }
+
+    @MainActor
+    func testReleaseModelRejectsInsecureCapabilityBeforePersistence() async throws {
+        let profiles = InMemoryGatewayProfileStore()
+        let credentials = InMemoryCredentialStore()
+        let repository = GatewayProfileRepository(
+            profileStore: profiles,
+            credentialStore: credentials
+        )
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [UnexpectedRequestURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let model = AppModel(dependencies: AppDependencies(
+            profileRepository: repository,
+            notificationService: NoopNotificationService(),
+            attachmentImporter: AttachmentImportService(),
+            urlSession: session,
+            allowsInsecureTransport: false
+        ))
+        await model.connect(
+            address: "https://gateway.example",
+            token: "token",
+            allowInsecure: true
+        )
+        let storedProfiles = try await profiles.load()
+        let storedCredentials = try await credentials.load()
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertTrue(storedProfiles.isEmpty)
+        XCTAssertNil(storedCredentials)
+    }
+
     @MainActor
     func testFailedCredentialClearDoesNotReportSuccessfulForget() async throws {
         let profiles = InMemoryGatewayProfileStore()
@@ -120,12 +280,36 @@ final class ProfileRepositoryTests: XCTestCase {
     }
 }
 
+private actor CountingCredentialStore: CredentialStore {
+    private(set) var loadCount = 0
+    private(set) var saveCount = 0
+
+    func save(_ credentials: GatewayCredentials) async throws { saveCount += 1 }
+    func load() async throws -> GatewayCredentials? {
+        loadCount += 1
+        return nil
+    }
+    func delete() async throws {}
+}
+
 private actor FailingDeleteCredentialStore: CredentialStore {
     private var value: GatewayCredentials?
 
     func save(_ credentials: GatewayCredentials) async throws { value = credentials }
     func load() async throws -> GatewayCredentials? { value }
     func delete() async throws { throw CredentialError.keychainFailure(OSStatusCode(-1)) }
+}
+
+private final class UnexpectedRequestURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        XCTFail("Transport policy must reject before network access")
+        client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
+    }
+
+    override func stopLoading() {}
 }
 
 private actor NoopNotificationService: NotificationScheduling {

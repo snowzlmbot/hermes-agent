@@ -26,5 +26,7 @@ class AndroidStoredSessionSelectionStoreTest {
     first.clear()
     assertNull(first.load())
     assertEquals("stored-second", second.load())
+    AndroidStoredSessionSelectionStore.clearAll(context)
+    assertNull(second.load())
   }
 }

@@ -7,6 +7,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.viewModelScope
+import com.snowzlmbot.hermes.mobile.BuildConfig
 import com.snowzlmbot.hermes.mobile.core.GatewayAuthMode
 import com.snowzlmbot.hermes.mobile.core.GatewayEndpoint
 import com.snowzlmbot.hermes.mobile.core.GatewayProfile
@@ -118,12 +119,20 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
         }
         return@launch
       }
+      if (allowInsecure && !BuildConfig.ALLOW_INSECURE_TRANSPORT) {
+        if (isCurrentConnection(generation)) {
+          mutableState.value = mutableState.value.copy(
+            configurationError = "Cleartext gateways are disabled in this build",
+          )
+        }
+        return@launch
+      }
       try {
         graph.saveConnection(
           GatewayProfile(
             address = address.trim(),
             authMode = GatewayAuthMode.TOKEN,
-            allowInsecure = allowInsecure,
+            allowInsecure = BuildConfig.ALLOW_INSECURE_TRANSPORT && allowInsecure,
             id = UUID.randomUUID().toString(),
           ),
           SecretValue(cleanToken),
@@ -311,9 +320,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
         controller = null
         chatCollection?.cancel()
         chatCollection = null
-        graph.restoreConnection()?.profile?.sessionSelectionScope?.let { scope ->
-          AndroidStoredSessionSelectionStore(getApplication<Application>(), scope).clear()
-        }
+        AndroidStoredSessionSelectionStore.clearAll(getApplication<Application>())
         graph.clearConnection()
         if (isCurrentConnection(generation)) {
           mutableState.value = AppUiState(screen = AppScreen.ONBOARDING)

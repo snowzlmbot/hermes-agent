@@ -22,4 +22,13 @@ internal class AndroidStoredSessionSelectionStore(
   override fun clear() {
     preferences.edit(commit = true) { remove(key) }
   }
+
+  companion object {
+    fun clearAll(context: Context) {
+      context.applicationContext.getSharedPreferences(
+        "hermes.mobile.session-selection",
+        Context.MODE_PRIVATE,
+      ).edit(commit = true) { clear() }
+    }
+  }
 }

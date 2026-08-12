@@ -35,8 +35,10 @@ struct OnboardingView: View {
                         .textContentType(.password)
                         .accessibilityIdentifier("Gateway token")
 
-                    Toggle(String(localized: "connection.allow.insecure"), isOn: $allowInsecure)
-                        .accessibilityIdentifier("Allow insecure HTTP")
+                    if appModel.allowsInsecureTransport {
+                        Toggle(String(localized: "connection.allow.insecure"), isOn: $allowInsecure)
+                            .accessibilityIdentifier("Allow insecure HTTP")
+                    }
                 }
 
                 Section {

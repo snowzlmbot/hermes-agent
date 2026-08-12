@@ -1,5 +1,7 @@
 package com.snowzlmbot.hermes.mobile.core
 
+import java.time.Instant
+
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -38,6 +40,56 @@ class GatewayProfileRepositoryTest {
   }
 
   @Test
+  fun secureOnlyPolicyRejectsSavingCleartextProfiles() = runTest {
+    val profiles = FakeProfileStore()
+    val credentials = FakeCredentialStore()
+    val repository = GatewayProfileRepository(profiles, credentials, false)
+    val profile = GatewayProfile("http://127.0.0.1:8765", GatewayAuthMode.TOKEN, true)
+    val result = runCatching { repository.save(profile, SecretValue("token")) }
+    assertTrue(result.exceptionOrNull() is InsecureEndpointException)
+    val legacy = GatewayProfile("https://agent.example", GatewayAuthMode.TOKEN, true)
+    val legacyResult = runCatching { repository.save(legacy, SecretValue("token")) }
+    assertTrue(legacyResult.exceptionOrNull() is InsecureEndpointException)
+    assertNull(profiles.profile)
+    assertNull(credentials.auth)
+  }
+
+  @Test
+  fun secureOnlyPolicyRejectsLoadedCleartextProfiles() = runTest {
+    val profiles = FakeProfileStore().apply {
+      profile = GatewayProfile("http://gateway.local", GatewayAuthMode.TOKEN, true)
+    }
+    val credentials = FakeCredentialStore().apply {
+      auth = StoredGatewayAuth.StaticToken(SecretValue("token"))
+    }
+    val repository = GatewayProfileRepository(profiles, credentials, false)
+    val result = runCatching { repository.load() }
+    assertTrue(result.exceptionOrNull() is InsecureEndpointException)
+    assertEquals(0, credentials.loadCount)
+    profiles.profile = GatewayProfile("http://127.0.0.1", GatewayAuthMode.OAUTH, true)
+    credentials.auth = StoredGatewayAuth.OAuth(testOAuthTokens())
+    val debugRepository = GatewayProfileRepository(profiles, credentials, true)
+    val oauthResult = runCatching { debugRepository.load() }
+    assertTrue(oauthResult.exceptionOrNull() is InsecureEndpointException)
+    assertEquals(0, credentials.loadCount)
+  }
+
+  @Test
+  fun debugPolicyAllowsExplicitCleartextProfiles() = runTest {
+    val profiles = FakeProfileStore()
+    val repository = GatewayProfileRepository(profiles, FakeCredentialStore(), true)
+    val denied = GatewayProfile("http://127.0.0.1", GatewayAuthMode.TOKEN, false)
+    val deniedResult = runCatching { repository.save(denied, SecretValue("token")) }
+    assertTrue(deniedResult.exceptionOrNull() is InsecureEndpointException)
+    val oauth = GatewayProfile("http://127.0.0.1", GatewayAuthMode.OAUTH, true)
+    val oauthResult = runCatching { repository.save(oauth, StoredGatewayAuth.OAuth(testOAuthTokens())) }
+    assertTrue(oauthResult.exceptionOrNull() is InsecureEndpointException)
+    val profile = GatewayProfile("http://gateway.local", GatewayAuthMode.TOKEN, true)
+    repository.save(profile, SecretValue("token"))
+    assertEquals(profile, profiles.profile)
+  }
+
+  @Test
   fun clearingRepositoryRemovesMetadataAndCredential() = runTest {
     val profiles = FakeProfileStore()
     val credentials = FakeCredentialStore()
@@ -54,6 +106,14 @@ class GatewayProfileRepositoryTest {
     assertNull(credentials.auth)
     assertTrue(credentials.clearCount > 0)
   }
+
+  private fun testOAuthTokens() = OAuthTokenSet(
+    accessToken = SecretValue("access"),
+    refreshToken = SecretValue("refresh"),
+    expiresAt = Instant.MAX,
+    provider = "provider",
+    userId = "user",
+  )
 
   private class FakeProfileStore : ProfileStore {
     var profile: GatewayProfile? = null
@@ -74,8 +134,12 @@ class GatewayProfileRepositoryTest {
   private class FakeCredentialStore : CredentialStore {
     var auth: StoredGatewayAuth? = null
     var clearCount: Int = 0
+    var loadCount: Int = 0
 
-    override suspend fun load(): StoredGatewayAuth? = auth
+    override suspend fun load(): StoredGatewayAuth? {
+      loadCount += 1
+      return auth
+    }
 
     override suspend fun save(auth: StoredGatewayAuth) {
       this.auth = auth

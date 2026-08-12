@@ -129,7 +129,11 @@ class GatewayAuthCoordinatorTest {
   private suspend fun coordinator(tokens: OAuthTokenSet): Fixture {
     val profileStore = FakeProfileStore()
     val credentialStore = FakeCredentialStore()
-    val repository = GatewayProfileRepository(profileStore, credentialStore)
+    val repository = GatewayProfileRepository(
+      profileStore,
+      credentialStore,
+      allowInsecureOAuthForTesting = true,
+    )
     val profile = GatewayProfile(server.url("/").toString(), GatewayAuthMode.OAUTH, true)
     repository.save(profile, StoredGatewayAuth.OAuth(tokens))
     return Fixture(

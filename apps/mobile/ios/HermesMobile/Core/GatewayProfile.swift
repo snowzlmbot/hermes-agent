@@ -164,26 +164,32 @@ public actor GatewayProfileRepository {
     private let profileStore: any GatewayProfileStore
     private let credentialStore: any CredentialStore
     private let sessionSelectionStore: any StoredSessionSelectionStore
+    private let allowsInsecureTransport: Bool
 
     public init(
         profileStore: any GatewayProfileStore,
         credentialStore: any CredentialStore,
-        sessionSelectionStore: any StoredSessionSelectionStore = InMemoryStoredSessionSelectionStore()
+        sessionSelectionStore: any StoredSessionSelectionStore = InMemoryStoredSessionSelectionStore(),
+        allowsInsecureTransport: Bool = false
     ) {
         self.profileStore = profileStore
         self.credentialStore = credentialStore
         self.sessionSelectionStore = sessionSelectionStore
+        self.allowsInsecureTransport = allowsInsecureTransport
     }
 
     public func load() async throws -> StoredGatewayConnection? {
         let profiles = try await profileStore.load()
-        guard let profile = profiles.first,
-              let credentials = try await credentialStore.load() else { return nil }
+        guard let profile = profiles.first else { return nil }
+        try validate(profile)
+        guard let credentials = try await credentialStore.load() else { return nil }
+        try validate(credentials, for: profile)
         return StoredGatewayConnection(profile: profile, credentials: credentials)
     }
 
     public func save(profile: GatewayProfile, credentials: GatewayCredentials) async throws {
-        _ = try GatewayEndpoint(rawValue: profile.endpoint, allowInsecureRemote: profile.allowInsecure)
+        try validate(profile)
+        try validate(credentials, for: profile)
         try await credentialStore.save(credentials)
         try await profileStore.save(profile)
     }
@@ -202,6 +208,30 @@ public actor GatewayProfileRepository {
 
     public func saveStoredSessionID(_ storedSessionID: String?, profileID: String) async {
         await sessionSelectionStore.save(storedSessionID, profileID: profileID)
+    }
+
+    private func validate(_ profile: GatewayProfile) throws {
+        let buildAllowsInsecure = profile.authMode == .token && allowsInsecureTransport
+        let allowInsecure = buildAllowsInsecure && profile.allowInsecure
+        if profile.allowInsecure && !allowInsecure {
+            throw GatewayEndpointError.insecureRemoteEndpoint
+        }
+        let endpoint = try GatewayEndpoint(
+            rawValue: profile.endpoint,
+            allowInsecureRemote: allowInsecure
+        )
+        if endpoint.baseURL.scheme != "https" && !allowInsecure {
+            throw GatewayEndpointError.insecureRemoteEndpoint
+        }
+    }
+
+    private func validate(_ credentials: GatewayCredentials, for profile: GatewayProfile) throws {
+        switch (profile.authMode, credentials.auth) {
+        case (.token, .token(_)), (.oauth, .oauth(_)):
+            return
+        default:
+            throw CredentialError.authModeMismatch
+        }
     }
 
     public func clear() async throws {

@@ -15,9 +15,13 @@ android {
     versionCode = 1
     versionName = "0.1.0"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    buildConfigField("boolean", "ALLOW_INSECURE_TRANSPORT", "false")
   }
 
   buildTypes {
+    debug {
+      buildConfigField("boolean", "ALLOW_INSECURE_TRANSPORT", "true")
+    }
     release {
       isMinifyEnabled = true
       isShrinkResources = true
