@@ -474,6 +474,7 @@ private fun SessionDrawer(
     }
   }
 }
+}
 
 @Composable
 private fun RowScope.SessionViewButton(label: String, selected: Boolean, onClick: () -> Unit) {
