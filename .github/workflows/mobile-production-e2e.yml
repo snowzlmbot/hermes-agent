@@ -6,6 +6,7 @@ on:
     branches:
       - hermes-agent-Mobile-app
       - mobile-production-e2e-ci
+      - mobile-session-library-ci
     paths:
       - hermes_cli/dashboard_auth/**
       - hermes_cli/subcommands/dashboard.py
