@@ -2,6 +2,7 @@ import SwiftUI
 
 struct OnboardingView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var address = "https://"
     @State private var token = ""
     @State private var allowInsecure = false
@@ -21,41 +22,72 @@ struct OnboardingView: View {
                 }
 
                 Section {
-                    TextField(
-                        String(localized: "connection.address"),
-                        text: $address
-                    )
-                    .frame(minHeight: 44, alignment: .leading)
-                    .font(.body.weight(.medium))
-                    .foregroundStyle(.primary)
-                    .textContentType(.URL)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .accessibilityIdentifier("Gateway address")
-
-                    SecureField(String(localized: "connection.token"), text: $token)
-                        .frame(minHeight: 44, alignment: .leading)
-                        .font(.body.weight(.medium))
-                        .foregroundStyle(.primary)
-                        .textContentType(.password)
-                        .accessibilityIdentifier("Gateway token")
-
-                    if appModel.allowsInsecureTransport {
-                        Toggle(isOn: $allowInsecure) {
-                            Text(String(localized: "connection.allow.insecure"))
-                                .fontWeight(.medium)
-                                .foregroundStyle(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(minHeight: 44, alignment: .leading)
-                        .accessibilityIdentifier("Allow insecure HTTP")
-                    }
-                } header: {
                     Text(String(localized: "connection.section"))
                         .font(.headline)
                         .foregroundStyle(.primary)
-                        .textCase(nil)
+                        .accessibilityAddTraits(.isHeader)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(String(localized: "connection.address"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityHidden(true)
+                        TextField("", text: $address, axis: .vertical)
+                            .lineLimit(1...3)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .textContentType(.URL)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .accessibilityLabel(String(localized: "connection.address"))
+                            .accessibilityIdentifier("Gateway address")
+                    }
+                    .padding(.vertical, 4)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(String(localized: "connection.token"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityHidden(true)
+                        SecureField("", text: $token)
+                            .padding(.vertical, 8)
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .textContentType(.password)
+                            .privacySensitive()
+                            .accessibilityLabel(String(localized: "connection.token"))
+                            .accessibilityIdentifier("Gateway token")
+                    }
+                    .padding(.vertical, 4)
+
+                    if appModel.allowsInsecureTransport {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(String(localized: "connection.allow.insecure"))
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.primary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .accessibilityHidden(true)
+                                Toggle("", isOn: $allowInsecure)
+                                    .labelsHidden()
+                                    .accessibilityLabel(String(localized: "connection.allow.insecure"))
+                                    .accessibilityIdentifier("Allow insecure HTTP")
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
+                        } else {
+                            Toggle(isOn: $allowInsecure) {
+                                Text(String(localized: "connection.allow.insecure"))
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(.primary)
+                            }
+                            .accessibilityIdentifier("Allow insecure HTTP")
+                        }
+                    }
                 }
 
                 Section {
