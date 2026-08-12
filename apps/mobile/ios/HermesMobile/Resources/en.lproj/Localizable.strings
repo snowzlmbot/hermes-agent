@@ -24,6 +24,12 @@
 "sessions.title" = "Sessions";
 "sessions.empty.title" = "No sessions";
 "sessions.empty.description" = "Start a new conversation with the add button.";
+"sessions.view" = "Session view";
+"sessions.active" = "Active";
+"sessions.archived" = "Archived";
+"sessions.search.prompt" = "Search sessions";
+"sessions.search.empty.title" = "No matching sessions";
+"sessions.search.empty.description" = "Try a title, preview, or stored session ID.";
 "session.new" = "New conversation";
 "session.no.preview" = "No messages yet";
 "session.title.field" = "Session title";
@@ -68,6 +74,7 @@
 "action.pin" = "Pin";
 "action.unpin" = "Unpin";
 "action.archive" = "Archive";
+"action.restore" = "Restore";
 "action.delete" = "Delete";
 "action.cancel" = "Cancel";
 "action.save" = "Save";
@@ -109,6 +116,7 @@
 "error.session.rename" = "Could not rename that session.";
 "error.session.pin" = "Could not update that session's pinned state.";
 "error.session.archive" = "Could not archive that session.";
+"error.session.restore" = "Could not restore that session.";
 "error.session.delete" = "Could not delete that session.";
 "error.sessions.load" = "Could not refresh sessions.";
 "error.message.send" = "The message could not be sent.";

@@ -247,17 +247,16 @@ public final class ChatModel {
             ]
         )
         var parsed = GatewayProtocol.parseSessionList(result: result)
-        if !includeArchived {
-            parsed.removeAll { $0.archived }
-        }
         if let archiveStore {
-            var visible: [SessionSummary] = []
-            for session in parsed {
-                if !(await archiveStore.isArchived(session.storedID)) {
-                    visible.append(session)
+            for index in parsed.indices {
+                let storedID = parsed[index].storedID
+                if await archiveStore.isArchived(storedID) {
+                    parsed[index].archived = true
                 }
             }
-            parsed = visible
+        }
+        if !includeArchived {
+            parsed.removeAll { $0.archived }
         }
         return parsed
     }
@@ -527,10 +526,35 @@ public final class ChatModel {
             updated.archived = archived
             return updated
         }
-        if archived {
-            sessions.removeAll { $0.storedID == storedSessionID }
-            if state.storedSessionID == storedSessionID { state = .empty }
+        // Keep the summary for the archived library while clearing an archived active conversation.
+        if archived, state.storedSessionID == storedSessionID {
+            state = .empty
         }
+    }
+
+    public func restoreArchivedSession(storedSessionID: String) async throws {
+        let cleanID = storedSessionID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanID.isEmpty else { throw ChatModelError.sessionRequired }
+        let listGeneration = beginSessionListOperation()
+        let sessionGeneration = sessionOperationGeneration
+        defer {
+            if isCurrentSessionListOperation(listGeneration) { isLoadingSessions = false }
+        }
+        if let sessionMutationClient {
+            try await sessionMutationClient.patchSession(
+                SessionMutation(storedID: cleanID, archived: false)
+            )
+        } else if let archiveStore {
+            try await archiveStore.setArchived(false, storedID: cleanID)
+        } else {
+            throw ChatModelError.archiveUnavailable
+        }
+        guard isCurrentSessionListOperation(listGeneration),
+              isCurrentSessionOperation(sessionGeneration) else { return }
+        let parsed = try await fetchSessions(includeArchived: true)
+        guard isCurrentSessionListOperation(listGeneration),
+              isCurrentSessionOperation(sessionGeneration) else { return }
+        applySessions(parsed)
     }
 
     public func setPinned(_ pinned: Bool, storedSessionID: String) async throws {

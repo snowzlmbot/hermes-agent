@@ -56,14 +56,22 @@ final class ChatModelTests: XCTestCase {
         let archive = RecordingSessionMutationClient()
         let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
         let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("token"), socketFactory: { _ in socket })
-        let model = ChatModel(transport: transport, sessionMutationClient: archive)
+        let model = ChatModel(
+            transport: transport,
+            sessionMutationClient: archive,
+            sessions: [SessionSummary(storedID: "stored-1")]
+        )
 
         try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
         try await model.setArchived(true, storedSessionID: "stored-1")
 
         let mutations = await archive.mutations
         let requests = await socket.requests
         XCTAssertEqual(mutations, [.init(storedID: "stored-1", title: nil, archived: true, pinned: nil)])
+        XCTAssertTrue(try XCTUnwrap(model.sessions.first).archived)
+        XCTAssertNil(model.state.runtimeSessionID)
+        XCTAssertNil(model.state.storedSessionID)
         XCTAssertTrue(requests.isEmpty)
     }
 
@@ -616,6 +624,65 @@ final class ChatModelTests: XCTestCase {
         XCTAssertEqual(signals, [.messageCompleted(storedSessionID: "stored-1")])
     }
 
+    func testRestoreArchivedSessionRefreshesWithoutChangingIdentity() async throws {
+        let socket = ControlledChatSocket()
+        let mutations = RecordingSessionMutationClient()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .token("token"),
+            socketFactory: { _ in socket }
+        )
+        let archived = SessionSummary(storedID: "archived", archived: true)
+        let model = ChatModel(
+            transport: transport,
+            sessionMutationClient: mutations,
+            sessions: [archived]
+        )
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-current", storedID: "current")
+        let restoration = Task {
+            try await model.restoreArchivedSession(storedSessionID: "archived")
+        }
+        let requests = await socket.waitForRequests(count: 1)
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.method, GatewayMethod.sessionList)
+        await socket.pushResponse(id: request.id, result: sessionLibraryResult())
+        try await restoration.value
+        XCTAssertEqual(model.state.runtimeSessionID, "runtime-current")
+        XCTAssertEqual(model.state.storedSessionID, "current")
+        XCTAssertEqual(model.sessions.map(\.storedID), ["archived"])
+        XCTAssertFalse(try XCTUnwrap(model.sessions.first).archived)
+        let recorded = await mutations.mutations
+        XCTAssertEqual(recorded, [.init(storedID: "archived", archived: false)])
+    }
+
+    func testRestoreFailureKeepsArchivedSummaryAndIdentity() async throws {
+        let socket = ControlledChatSocket()
+        let mutations = RecordingSessionMutationClient(failPatches: true)
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .token("token"),
+            socketFactory: { _ in socket }
+        )
+        let archived = SessionSummary(storedID: "archived", archived: true)
+        let model = ChatModel(
+            transport: transport,
+            sessionMutationClient: mutations,
+            sessions: [archived]
+        )
+        try await model.connect()
+        model.setRuntimeSession(runtimeID: "runtime-current", storedID: "current")
+        do {
+            try await model.restoreArchivedSession(storedSessionID: "archived")
+            XCTFail("Expected restore failure")
+        } catch {}
+        XCTAssertEqual(model.state.runtimeSessionID, "runtime-current")
+        XCTAssertEqual(model.state.storedSessionID, "current")
+        XCTAssertTrue(try XCTUnwrap(model.sessions.first).archived)
+    }
+
     func testDemoSeedProvidesModelControlsCatalog() throws {
         let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1")
         let transport = HermesGatewayTransport(endpoint: endpoint, auth: .token("demo"), socketFactory: { _ in
@@ -800,6 +867,17 @@ private func activeSessionResult(runtimeID: String, storedID: String) -> JSONVal
     ])
 }
 
+private func sessionLibraryResult() -> JSONValue {
+    .object(["sessions": .array([
+        .object([
+            "id": .string("archived"),
+            "title": .string("Restored"),
+            "archived": .bool(false),
+            "pinned": .bool(false)
+        ])
+    ])])
+}
+
 private func modelOptionsResult() -> JSONValue {
     .object([
         "model": .string("fixture-model"),
@@ -811,8 +889,14 @@ private func modelOptionsResult() -> JSONValue {
 private actor RecordingSessionMutationClient: SessionMutationClient {
     var mutations: [SessionMutation] = []
     var deletedIDs: [String] = []
+    private let failPatches: Bool
+
+    init(failPatches: Bool = false) {
+        self.failPatches = failPatches
+    }
 
     func patchSession(_ mutation: SessionMutation) async throws {
+        if failPatches { throw GatewayTransportError.connectionLost }
         mutations.append(mutation)
     }
 

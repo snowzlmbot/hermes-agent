@@ -5,48 +5,69 @@ struct SessionListView: View {
     @State private var renameTarget: SessionSummary?
     @State private var renameText = ""
     @State private var deleteTarget: SessionSummary?
+    @State private var libraryView: SessionLibraryView = .active
+    @State private var searchQuery = ""
 
     private var sessions: [SessionSummary] {
         appModel.chatModel?.sessions ?? []
+    }
+
+    private var visibleSessions: [SessionSummary] {
+        SessionLibrary.filter(sessions, view: libraryView, query: searchQuery)
     }
 
     var body: some View {
         List(selection: Binding(
             get: { appModel.selectedSessionID },
             set: { next in
-                guard let next else { return }
+                guard let next,
+                      sessions.first(where: { $0.storedID == next })?.archived != true else { return }
                 Task { await appModel.selectSession(next) }
             }
         )) {
-            if sessions.isEmpty {
+            if visibleSessions.isEmpty {
                 ContentUnavailableView(
-                    String(localized: "sessions.empty.title"),
+                    searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? String(localized: "sessions.empty.title")
+                        : String(localized: "sessions.search.empty.title"),
                     systemImage: "bubble.left.and.bubble.right",
-                    description: Text(String(localized: "sessions.empty.description"))
+                    description: Text(
+                        searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? String(localized: "sessions.empty.description")
+                            : String(localized: "sessions.search.empty.description")
+                    )
                 )
             } else {
-                ForEach(sessions) { session in
+                ForEach(visibleSessions) { session in
                     SessionRow(session: session)
                         .tag(session.storedID)
                         .contextMenu {
-                            Button {
-                                Task { await appModel.setSessionPinned(!session.pinned, storedID: session.storedID) }
-                            } label: {
-                                Label(
-                                    String(localized: session.pinned ? "action.unpin" : "action.pin"),
-                                    systemImage: session.pinned ? "pin.slash" : "pin"
-                                )
-                            }
-                            Button {
-                                renameTarget = session
-                                renameText = session.displayTitle
-                            } label: {
-                                Label(String(localized: "action.rename"), systemImage: "pencil")
-                            }
-                            Button {
-                                Task { await appModel.archiveSession(session.storedID) }
-                            } label: {
-                                Label(String(localized: "action.archive"), systemImage: "archivebox")
+                            if session.archived {
+                                Button {
+                                    Task { await appModel.restoreSession(session.storedID) }
+                                } label: {
+                                    Label(String(localized: "action.restore"), systemImage: "archivebox.fill")
+                                }
+                            } else {
+                                Button {
+                                    Task { await appModel.setSessionPinned(!session.pinned, storedID: session.storedID) }
+                                } label: {
+                                    Label(
+                                        String(localized: session.pinned ? "action.unpin" : "action.pin"),
+                                        systemImage: session.pinned ? "pin.slash" : "pin"
+                                    )
+                                }
+                                Button {
+                                    renameTarget = session
+                                    renameText = session.displayTitle
+                                } label: {
+                                    Label(String(localized: "action.rename"), systemImage: "pencil")
+                                }
+                                Button {
+                                    Task { await appModel.archiveSession(session.storedID) }
+                                } label: {
+                                    Label(String(localized: "action.archive"), systemImage: "archivebox")
+                                }
                             }
                             Button(role: .destructive) {
                                 deleteTarget = session
@@ -55,12 +76,21 @@ struct SessionListView: View {
                             }
                         }
                         .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            Button {
-                                Task { await appModel.archiveSession(session.storedID) }
-                            } label: {
-                                Label(String(localized: "action.archive"), systemImage: "archivebox")
+                            if session.archived {
+                                Button {
+                                    Task { await appModel.restoreSession(session.storedID) }
+                                } label: {
+                                    Label(String(localized: "action.restore"), systemImage: "archivebox.fill")
+                                }
+                                .tint(.green)
+                            } else {
+                                Button {
+                                    Task { await appModel.archiveSession(session.storedID) }
+                                } label: {
+                                    Label(String(localized: "action.archive"), systemImage: "archivebox")
+                                }
+                                .tint(.orange)
                             }
-                            .tint(.orange)
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button(role: .destructive) { deleteTarget = session } label: {
@@ -71,8 +101,23 @@ struct SessionListView: View {
             }
         }
         .listStyle(.sidebar)
+        .searchable(text: $searchQuery, prompt: String(localized: "sessions.search.prompt"))
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Picker(String(localized: "sessions.view"), selection: $libraryView) {
+                Text(String(localized: "sessions.active")).tag(SessionLibraryView.active)
+                Text(String(localized: "sessions.archived")).tag(SessionLibraryView.archived)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
         .refreshable {
-            try? await appModel.chatModel?.loadSessions()
+            guard appModel.chatModel?.isConnected == true else { return }
+            try? await appModel.chatModel?.loadSessions(includeArchived: true)
+        }
+        .task {
+            guard appModel.chatModel?.isConnected == true else { return }
+            try? await appModel.chatModel?.loadSessions(includeArchived: true)
         }
         .sheet(item: $renameTarget) { target in
             RenameSessionSheet(

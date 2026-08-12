@@ -300,6 +300,27 @@ public final class AppModel {
         }
     }
 
+    public func restoreSession(_ storedID: String) async {
+        guard let chatModel, let profile else { return }
+        let expectedScope = profile.sessionSelectionScope
+        let expectedGeneration = profileGeneration
+        do {
+            try await chatModel.restoreArchivedSession(storedSessionID: storedID)
+            guard isCurrentProfileContext(
+                scope: expectedScope,
+                generation: expectedGeneration,
+                chatModel: chatModel
+            ) else { return }
+        } catch {
+            guard isCurrentProfileContext(
+                scope: expectedScope,
+                generation: expectedGeneration,
+                chatModel: chatModel
+            ) else { return }
+            errorMessage = String(localized: "error.session.restore")
+        }
+    }
+
     public func renameSession(_ storedID: String, title: String) async {
         guard let chatModel else { return }
         do {
@@ -314,7 +335,7 @@ public final class AppModel {
         do {
             try await chatModel.setArchived(true, storedSessionID: storedID)
             if selectedSessionID == storedID {
-                if let nextStoredID = chatModel.sessions.first?.storedID {
+                if let nextStoredID = chatModel.sessions.first(where: { !$0.archived })?.storedID {
                     await selectSession(nextStoredID)
                 } else {
                     _ = await beginSessionSelectionOperation()
@@ -340,7 +361,7 @@ public final class AppModel {
         do {
             try await chatModel.delete(storedSessionID: storedID)
             if selectedSessionID == storedID {
-                if let nextStoredID = chatModel.sessions.first?.storedID {
+                if let nextStoredID = chatModel.sessions.first(where: { !$0.archived })?.storedID {
                     await selectSession(nextStoredID)
                 } else {
                     _ = await beginSessionSelectionOperation()
