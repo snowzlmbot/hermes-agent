@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - hermes-agent-Mobile-app
+      - mobile-production-e2e-ci
     paths:
       - hermes_cli/dashboard_auth/**
       - hermes_cli/subcommands/dashboard.py
