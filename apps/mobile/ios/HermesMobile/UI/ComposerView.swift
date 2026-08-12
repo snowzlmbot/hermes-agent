@@ -39,6 +39,7 @@ struct ComposerView: View {
                     TextEditor(text: $text)
                         .frame(minHeight: 38, maxHeight: 120)
                         .scrollContentBackground(.hidden)
+                        .accessibilityLabel(String(localized: "composer.placeholder"))
                         .accessibilityIdentifier("Message Hermes")
                 }
                 .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
