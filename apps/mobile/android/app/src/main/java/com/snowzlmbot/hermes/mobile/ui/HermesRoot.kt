@@ -80,6 +80,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
@@ -230,6 +233,9 @@ internal fun NativeOAuthSection(
     Text(
       stringResource(R.string.oauth_pending),
       style = MaterialTheme.typography.bodySmall,
+      modifier = Modifier
+        .testTag("oauth-pending")
+        .semantics { liveRegion = LiveRegionMode.Polite },
     )
     TextButton(
       onClick = onCancel,
