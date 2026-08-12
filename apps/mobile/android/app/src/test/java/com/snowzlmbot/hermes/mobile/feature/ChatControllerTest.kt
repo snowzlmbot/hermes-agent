@@ -18,6 +18,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -298,6 +299,40 @@ class ChatControllerTest {
     assertFalse(controller.state.value.isLoadingModelOptions)
   }
 
+  @Test
+  fun restoreSessionRefreshesArchiveWithoutChangingCurrentIdentity() = runTest {
+    val runtime = RecordingRuntime()
+    runtime.listedSessions = listOf(summary("stored-archived").copy(archived = true))
+    val controller = ChatController(runtime, backgroundScope)
+    controller.connect()
+    controller.newSession()
+    val identity = controller.state.value.chat.runtimeSessionId to controller.state.value.chat.storedSessionId
+
+    controller.restoreSession("stored-archived")
+
+    assertEquals(listOf("stored-archived" to false), runtime.archivedUpdates)
+    assertFalse(controller.state.value.sessions.single().archived)
+    assertEquals(identity, controller.state.value.chat.runtimeSessionId to controller.state.value.chat.storedSessionId)
+  }
+
+  @Test
+  fun restoreFailureKeepsArchivedEntryAndCurrentIdentity() = runTest {
+    val runtime = RecordingRuntime().apply {
+      listedSessions = listOf(summary("stored-archived").copy(archived = true))
+      failSessionUpdates = true
+    }
+    val controller = ChatController(runtime, backgroundScope)
+    controller.connect()
+    controller.newSession()
+    val identity = controller.state.value.chat.runtimeSessionId to controller.state.value.chat.storedSessionId
+
+    controller.restoreSession("stored-archived")
+
+    assertTrue(controller.state.value.sessions.single().archived)
+    assertEquals(identity, controller.state.value.chat.runtimeSessionId to controller.state.value.chat.storedSessionId)
+    assertNotNull(controller.state.value.error)
+  }
+
   private class RecordingRuntime : MobileGatewayRuntime {
     override val events = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 8)
     val lifecycleCalls = mutableListOf<String>()
@@ -305,6 +340,7 @@ class ChatControllerTest {
     val prompts = mutableListOf<Pair<String, String>>()
     val interrupted = mutableListOf<String>()
     val pinnedUpdates = mutableListOf<Pair<String, Boolean>>()
+    val archivedUpdates = mutableListOf<Pair<String, Boolean>>()
     val modelOptionsRequests = mutableListOf<String>()
     val modelOptionRefreshes = mutableListOf<Boolean>()
     val modelSelections = mutableListOf<Pair<String, Pair<String, String>>>()
@@ -313,6 +349,7 @@ class ChatControllerTest {
     var listedSessions = listOf(summary("stored-1"))
     var sessionListRequests = 0
     var failPrompts = false
+    var failSessionUpdates = false
     var failResumes = false
     var modelSwitchResult: ModelSwitchResult = ModelSwitchResult.Applied
     var delayResumes = false
@@ -415,6 +452,13 @@ class ChatControllerTest {
       archived: Boolean?,
       pinned: Boolean?,
     ) {
+      if (failSessionUpdates) error("gateway unavailable")
+      if (archived != null) {
+        archivedUpdates += storedId to archived
+        listedSessions = listedSessions.map { session ->
+          if (session.storedId == storedId) session.copy(archived = archived) else session
+        }
+      }
       if (pinned != null) {
         pinnedUpdates += storedId to pinned
         listedSessions = listedSessions.map { session ->

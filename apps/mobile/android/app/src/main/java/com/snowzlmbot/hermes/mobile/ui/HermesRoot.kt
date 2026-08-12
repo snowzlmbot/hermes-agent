@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
 
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Wifi
@@ -95,6 +97,8 @@ import com.snowzlmbot.hermes.mobile.feature.ChatMessage
 import com.snowzlmbot.hermes.mobile.feature.ChatState
 import com.snowzlmbot.hermes.mobile.feature.ClarifyPrompt
 import com.snowzlmbot.hermes.mobile.feature.SecretPrompt
+import com.snowzlmbot.hermes.mobile.feature.SessionLibrary
+import com.snowzlmbot.hermes.mobile.feature.SessionLibraryView
 import com.snowzlmbot.hermes.mobile.feature.SudoPrompt
 import com.snowzlmbot.hermes.mobile.feature.ToolState
 import kotlinx.coroutines.launch
@@ -274,6 +278,7 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
           onRename = { renameId = it },
           onSetPinned = viewModel::setPinned,
           onArchive = { viewModel.archiveSession(it) },
+          onRestore = viewModel::restoreSession,
           onDelete = { viewModel.deleteSession(it) },
         )
       }
@@ -382,9 +387,13 @@ private fun SessionDrawer(
   onRename: (String) -> Unit,
   onSetPinned: (String, Boolean) -> Unit,
   onArchive: (String) -> Unit,
+  onRestore: (String) -> Unit,
   onDelete: (String) -> Unit,
 ) {
   var menuId by remember { mutableStateOf<String?>(null) }
+  var query by remember { mutableStateOf("") }
+  var view by remember { mutableStateOf(SessionLibraryView.ACTIVE) }
+  val visible = SessionLibrary.filter(sessions, view, query)
   Column(Modifier.fillMaxSize().padding(vertical = 20.dp)) {
     Row(
       Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -394,22 +403,47 @@ private fun SessionDrawer(
       Text("Sessions", style = MaterialTheme.typography.titleLarge)
       IconButton(onClick = onNew) { Icon(Icons.Default.Add, contentDescription = "New session") }
     }
-    HorizontalDivider()
-    if (sessions.isEmpty()) {
-      Text("No saved sessions", Modifier.padding(20.dp), style = MaterialTheme.typography.bodyMedium)
+    OutlinedTextField(
+      value = query,
+      onValueChange = { query = it },
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("session-search"),
+      singleLine = true,
+      leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search sessions") },
+      trailingIcon = {
+        if (query.isNotEmpty()) TextButton(onClick = { query = "" }) { Text("Clear") }
+      },
+      placeholder = { Text("Search sessions") },
+    )
+    Row(
+      Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+      SessionViewButton("Active", view == SessionLibraryView.ACTIVE) { view = SessionLibraryView.ACTIVE }
+      SessionViewButton("Archived", view == SessionLibraryView.ARCHIVED) { view = SessionLibraryView.ARCHIVED }
     }
-    sessions.forEach { session ->
+    HorizontalDivider()
+    if (visible.isEmpty()) {
+      Text(
+        if (query.trim().isEmpty()) "No sessions in this view" else "No matching sessions",
+        Modifier.padding(20.dp),
+        style = MaterialTheme.typography.bodyMedium,
+      )
+    }
+    LazyColumn(Modifier.weight(1f)) {
+      items(visible, key = { it.storedId }) { session ->
       Row(
         Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        TextButton(onClick = { onOpen(session.storedId) }, modifier = Modifier.weight(1f)) {
+        TextButton(
+          onClick = { if (!session.archived) onOpen(session.storedId) },
+          enabled = !session.archived,
+          modifier = Modifier.weight(1f),
+        ) {
           Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
             Row(verticalAlignment = Alignment.CenterVertically) {
               Text(session.displayTitle, maxLines = 1, modifier = Modifier.weight(1f))
-              if (session.pinned) {
-                Icon(Icons.Default.PushPin, contentDescription = "Pinned")
-              }
+              if (session.pinned) Icon(Icons.Default.PushPin, contentDescription = "Pinned")
             }
             Text(session.preview, maxLines = 1, style = MaterialTheme.typography.labelSmall)
           }
@@ -419,22 +453,32 @@ private fun SessionDrawer(
             Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
           }
           DropdownMenu(expanded = menuId == session.storedId, onDismissRequest = { menuId = null }) {
-            DropdownMenuItem(
-              text = { Text(if (session.pinned) "Unpin" else "Pin") },
-              leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) },
-              onClick = {
-                menuId = null
-                onSetPinned(session.storedId, !session.pinned)
-              },
-            )
-            DropdownMenuItem(text = { Text("Rename") }, onClick = { menuId = null; onRename(session.storedId) })
-            DropdownMenuItem(text = { Text("Archive") }, onClick = { menuId = null; onArchive(session.storedId) })
+            if (session.archived) {
+              DropdownMenuItem(
+                text = { Text("Restore") },
+                onClick = { menuId = null; onRestore(session.storedId) },
+              )
+            } else {
+              DropdownMenuItem(
+                text = { Text(if (session.pinned) "Unpin" else "Pin") },
+                leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) },
+                onClick = { menuId = null; onSetPinned(session.storedId, !session.pinned) },
+              )
+              DropdownMenuItem(text = { Text("Rename") }, onClick = { menuId = null; onRename(session.storedId) })
+              DropdownMenuItem(text = { Text("Archive") }, onClick = { menuId = null; onArchive(session.storedId) })
+            }
             DropdownMenuItem(text = { Text("Delete") }, onClick = { menuId = null; onDelete(session.storedId) })
           }
         }
       }
     }
   }
+}
+
+@Composable
+private fun RowScope.SessionViewButton(label: String, selected: Boolean, onClick: () -> Unit) {
+  if (selected) Button(onClick = onClick, modifier = Modifier.weight(1f)) { Text(label) }
+  else OutlinedButton(onClick = onClick, modifier = Modifier.weight(1f)) { Text(label) }
 }
 
 @Composable

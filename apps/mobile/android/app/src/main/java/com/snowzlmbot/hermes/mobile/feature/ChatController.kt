@@ -57,6 +57,8 @@ internal interface MobileGatewayRuntime {
 
   suspend fun connect()
   suspend fun listSessions(): List<SessionSummary>
+
+  suspend fun listSessions(includeArchived: Boolean): List<SessionSummary> = listSessions()
   suspend fun createSession(): ActiveSession
   suspend fun resumeSession(storedId: String): ActiveSession
   suspend fun submitPrompt(runtimeId: String, text: String)
@@ -126,6 +128,7 @@ internal class ChatController(
   private val mutableState = MutableStateFlow(MobileChatUiState())
   private val sessionOperationGeneration = AtomicLong(0)
   private val modelControlOperationGeneration = AtomicLong(0)
+  private val sessionListGeneration = AtomicLong(0)
   private val eventJob: Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
     runtime.events.collect { event ->
       val current = mutableState.value
@@ -164,7 +167,7 @@ internal class ChatController(
     mutableState.value = mutableState.value.copy(phase = ConnectionPhase.CONNECTING, error = null)
     return try {
       runtime.connect()
-      val sessions = runtime.listSessions()
+      val sessions = runtime.listSessions(includeArchived = true)
       mutableState.value = mutableState.value.copy(
         phase = ConnectionPhase.CONNECTED,
         sessions = sessions.sortedForDisplay(),
@@ -189,13 +192,32 @@ internal class ChatController(
   }
 
   suspend fun refreshSessions() {
+    val generation = sessionListGeneration.incrementAndGet()
     try {
-      mutableState.value = mutableState.value.copy(
-        sessions = runtime.listSessions().sortedForDisplay(),
-        error = null,
-      )
+      val sessions = runtime.listSessions(includeArchived = true).sortedForDisplay()
+      if (sessionListGeneration.get() != generation) return
+      mutableState.value = mutableState.value.copy(sessions = sessions, error = null)
     } catch (error: Throwable) {
-      mutableState.value = mutableState.value.copy(error = error.toUiError())
+      if (sessionListGeneration.get() == generation) {
+        mutableState.value = mutableState.value.copy(error = error.toUiError())
+      }
+    }
+  }
+
+  suspend fun restoreSession(storedId: String) {
+    val id = storedId.trim()
+    if (id.isEmpty()) return
+    val generation = sessionListGeneration.incrementAndGet()
+    try {
+      runtime.updateSession(id, archived = false)
+      if (sessionListGeneration.get() != generation) return
+      val sessions = runtime.listSessions(includeArchived = true).sortedForDisplay()
+      if (sessionListGeneration.get() != generation) return
+      mutableState.value = mutableState.value.copy(sessions = sessions, error = null)
+    } catch (error: Throwable) {
+      if (sessionListGeneration.get() == generation) {
+        mutableState.value = mutableState.value.copy(error = error.toUiError())
+      }
     }
   }
 
@@ -435,6 +457,7 @@ internal class ChatController(
   fun close() {
     sessionOperationGeneration.incrementAndGet()
     modelControlOperationGeneration.incrementAndGet()
+    sessionListGeneration.incrementAndGet()
     eventJob.cancel()
     runtime.close()
   }

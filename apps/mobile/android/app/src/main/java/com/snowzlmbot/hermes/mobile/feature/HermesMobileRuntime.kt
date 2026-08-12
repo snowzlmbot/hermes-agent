@@ -15,6 +15,7 @@ import kotlinx.serialization.json.put
 
 internal interface MobileSessionSource {
   suspend fun listSessions(): List<SessionSummary>
+  suspend fun listSessions(includeArchived: Boolean): List<SessionSummary> = listSessions()
 
   suspend fun updateSession(
     storedId: String,
@@ -35,6 +36,9 @@ internal class RestMobileSessionSource(
 ) : MobileSessionSource {
   override suspend fun listSessions(): List<SessionSummary> =
     client.listSessions(includeArchived = false)
+
+  override suspend fun listSessions(includeArchived: Boolean): List<SessionSummary> =
+    client.listSessions(includeArchived = includeArchived)
 
   override suspend fun updateSession(
     storedId: String,
@@ -79,6 +83,9 @@ internal class HermesMobileRuntime(
     voice?.synthesize(text) ?: error("Voice playback is unavailable")
 
   override suspend fun listSessions(): List<SessionSummary> = sessions.listSessions()
+
+  override suspend fun listSessions(includeArchived: Boolean): List<SessionSummary> =
+    sessions.listSessions(includeArchived)
 
   override suspend fun listModelOptions(runtimeId: String, refresh: Boolean): ModelCatalog = GatewayProtocol.parseModelOptions(
     rpc.request(
