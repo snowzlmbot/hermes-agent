@@ -61,12 +61,7 @@ struct OnboardingView: View {
                     .accessibilityIdentifier("Gateway token")
 
                     if appModel.allowsInsecureTransport {
-                        Toggle(isOn: $allowInsecure) {
-                            Text(String(localized: "connection.allow.insecure"))
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .padding(.vertical, 4)
-                        .accessibilityIdentifier("Allow insecure HTTP")
+                        InsecureTransportToggle(isOn: $allowInsecure)
                     }
                 }
 
@@ -108,6 +103,45 @@ struct OnboardingView: View {
             .navigationTitle(String(localized: "app.name"))
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+}
+
+private struct InsecureTransportToggle: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Binding var isOn: Bool
+
+    private var label: String {
+        String(localized: "connection.allow.insecure")
+    }
+
+    var body: some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(label)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityHidden(true)
+                    Toggle(isOn: $isOn) {
+                        EmptyView()
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .accessibilityLabel(label)
+                    .accessibilityIdentifier("Allow insecure HTTP")
+                }
+            } else {
+                Toggle(isOn: $isOn) {
+                    Text(label)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityIdentifier("Allow insecure HTTP")
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .padding(.vertical, 4)
+        .accessibilityIdentifier("Allow insecure HTTP")
     }
 }
 

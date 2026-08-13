@@ -4,14 +4,20 @@ import XCTest
 final class HermesMobileUITests: XCTestCase {
     func testSetupScreenExposesAccessibleConnectionControls() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-smoke"]
+        app.launchArguments = [
+            "--ui-smoke",
+            "-UIPreferredContentSizeCategoryName",
+            "UICTContentSizeCategoryAccessibilityXXXL",
+        ]
         app.launch()
 
         XCTAssertTrue(app.staticTexts["Connect to Hermes"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.textFields["Gateway address"].exists)
         XCTAssertTrue(app.secureTextFields["Gateway token"].exists)
         XCTAssertTrue(app.buttons["Connect"].exists)
-        XCTAssertTrue(app.switches["Allow insecure HTTP"].exists)
+        let insecureTransportToggle = app.switches["Allow insecure HTTP"]
+        XCTAssertTrue(insecureTransportToggle.exists)
+        XCTAssertEqual(insecureTransportToggle.label, "Allow insecure HTTP")
         try app.performAccessibilityAudit()
     }
 
