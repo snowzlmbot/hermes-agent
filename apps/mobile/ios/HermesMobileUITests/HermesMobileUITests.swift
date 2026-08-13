@@ -13,11 +13,17 @@ final class HermesMobileUITests: XCTestCase {
 
         XCTAssertTrue(app.staticTexts["Connect to Hermes"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.textFields["Gateway address"].exists)
-        XCTAssertTrue(app.secureTextFields["Gateway token"].exists)
-        XCTAssertTrue(app.buttons["Connect"].exists)
+        try app.performAccessibilityAudit()
+
+        let tokenField = app.secureTextFields["Gateway token"]
+        XCTAssertTrue(reveal(tokenField, in: app))
+
         let insecureTransportToggle = app.switches["Allow insecure HTTP"]
-        XCTAssertTrue(insecureTransportToggle.exists)
+        XCTAssertTrue(reveal(insecureTransportToggle, in: app))
         XCTAssertEqual(insecureTransportToggle.label, "Allow insecure HTTP")
+        try app.performAccessibilityAudit()
+
+        XCTAssertTrue(reveal(app.buttons["Connect"], in: app))
         try app.performAccessibilityAudit()
     }
 
@@ -42,5 +48,19 @@ final class HermesMobileUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Model controls"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Model"].exists)
         XCTAssertTrue(app.staticTexts["Reasoning"].exists)
+    }
+
+    private func reveal(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        maxSwipes: Int = 6
+    ) -> Bool {
+        for _ in 0..<maxSwipes {
+            if element.exists && element.isHittable {
+                return true
+            }
+            app.swipeUp()
+        }
+        return element.waitForExistence(timeout: 2) && element.isHittable
     }
 }
