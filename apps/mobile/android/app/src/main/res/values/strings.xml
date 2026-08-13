@@ -24,4 +24,19 @@
   <string name="notification_completion_body">A response is ready.</string>
   <string name="notification_approval_body">Approval is required.</string>
   <string name="notification_input_body">Input is required.</string>
+  <string name="error_gateway_token_required">Enter a gateway token.</string>
+  <string name="error_cleartext_disabled">Cleartext gateways are disabled in this build.</string>
+  <string name="error_gateway_address_invalid">Enter a valid HTTP or HTTPS gateway address.</string>
+  <string name="error_connection_save">Could not save the connection.</string>
+  <string name="error_oauth_options">Could not load OAuth sign-in options.</string>
+  <string name="error_oauth_finish_current">Finish or cancel the current OAuth sign-in.</string>
+  <string name="error_oauth_load_first">Load OAuth sign-in options first.</string>
+  <string name="error_oauth_reload_address">Reload OAuth sign-in options for this gateway address.</string>
+  <string name="error_oauth_open">Could not open OAuth sign-in.</string>
+  <string name="error_oauth_start">Could not start OAuth sign-in.</string>
+  <string name="error_oauth_missing_pending">No OAuth sign-in is in progress.</string>
+  <string name="error_oauth_complete">Could not complete OAuth sign-in.</string>
+  <string name="error_oauth_browser_missing">No system browser is available for OAuth sign-in.</string>
+  <string name="error_attachment_upload">Could not attach the selected file.</string>
+  <string name="error_gateway_connect">Could not connect to the gateway.</string>
 </resources>

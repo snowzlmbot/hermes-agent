@@ -24,4 +24,19 @@
   <string name="notification_completion_body">回复已就绪。</string>
   <string name="notification_approval_body">需要审批。</string>
   <string name="notification_input_body">需要输入。</string>
+  <string name="error_gateway_token_required">请输入网关令牌。</string>
+  <string name="error_cleartext_disabled">此版本不允许明文网关连接。</string>
+  <string name="error_gateway_address_invalid">请输入有效的 HTTP 或 HTTPS 网关地址。</string>
+  <string name="error_connection_save">无法保存连接。</string>
+  <string name="error_oauth_options">无法加载 OAuth 登录方式。</string>
+  <string name="error_oauth_finish_current">请先完成或取消当前 OAuth 登录。</string>
+  <string name="error_oauth_load_first">请先加载 OAuth 登录方式。</string>
+  <string name="error_oauth_reload_address">请为当前网关地址重新加载 OAuth 登录方式。</string>
+  <string name="error_oauth_open">无法打开 OAuth 登录。</string>
+  <string name="error_oauth_start">无法开始 OAuth 登录。</string>
+  <string name="error_oauth_missing_pending">当前没有正在进行的 OAuth 登录。</string>
+  <string name="error_oauth_complete">无法完成 OAuth 登录。</string>
+  <string name="error_oauth_browser_missing">没有可用于 OAuth 登录的系统浏览器。</string>
+  <string name="error_attachment_upload">无法附加所选文件。</string>
+  <string name="error_gateway_connect">无法连接到网关。</string>
 </resources>

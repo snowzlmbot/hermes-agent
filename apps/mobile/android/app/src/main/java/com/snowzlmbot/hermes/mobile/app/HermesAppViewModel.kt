@@ -53,7 +53,7 @@ internal enum class AppScreen {
 internal data class AppUiState(
   val screen: AppScreen = AppScreen.LOADING,
   val chat: MobileChatUiState? = null,
-  val configurationError: String? = null,
+  val configurationError: AppError? = null,
   val oauthProviders: List<NativeOAuthProvider> = emptyList(),
   val isOAuthBusy: Boolean = false,
   val isOAuthPending: Boolean = false,
@@ -115,14 +115,14 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       val cleanToken = token.trim()
       if (cleanToken.isEmpty()) {
         if (isCurrentConnection(generation)) {
-          mutableState.value = mutableState.value.copy(configurationError = "A gateway token is required")
+          mutableState.value = mutableState.value.copy(configurationError = AppError.TOKEN_REQUIRED)
         }
         return@launch
       }
       if (allowInsecure && !BuildConfig.ALLOW_INSECURE_TRANSPORT) {
         if (isCurrentConnection(generation)) {
           mutableState.value = mutableState.value.copy(
-            configurationError = "Cleartext gateways are disabled in this build",
+            configurationError = AppError.CLEARTEXT_DISABLED,
           )
         }
         return@launch
@@ -143,7 +143,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
         if (!isCurrentConnection(generation)) return@launch
         mutableState.value = mutableState.value.copy(
           screen = AppScreen.ONBOARDING,
-          configurationError = error.message ?: "Could not save the connection",
+          configurationError = AppError.forConnection(error),
         )
       }
     }
@@ -173,7 +173,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
         if (error is CancellationException) throw error
         if (generation != oauthGeneration) return@launch
         mutableState.value = mutableState.value.copy(
-          configurationError = error.message ?: "Could not load OAuth sign-in options",
+          configurationError = AppError.forOAuthDiscovery(error),
           oauthProviders = emptyList(),
           isOAuthBusy = false,
         )
@@ -184,13 +184,13 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
   fun startOAuth(address: String, provider: String) {
     if (pendingOAuth != null) {
       mutableState.value = mutableState.value.copy(
-        configurationError = "Finish or cancel the current OAuth sign-in",
+        configurationError = AppError.OAUTH_IN_PROGRESS,
       )
       return
     }
     val discovery = oauthDiscovery ?: run {
       mutableState.value = mutableState.value.copy(
-        configurationError = "Load OAuth sign-in options first",
+        configurationError = AppError.OAUTH_OPTIONS_REQUIRED,
       )
       return
     }
@@ -198,7 +198,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       val currentEndpoint = GatewayEndpoint.parse(address.trim())
       if (currentEndpoint.httpBaseUrl != discovery.endpoint.httpBaseUrl) {
         mutableState.value = mutableState.value.copy(
-          configurationError = "Reload OAuth sign-in options for this gateway address",
+          configurationError = AppError.OAUTH_OPTIONS_STALE,
           oauthProviders = emptyList(),
         )
         oauthDiscovery = null
@@ -213,13 +213,13 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       if (!oauthBrowserChannel.trySend(pending.authorizationUrl.toString()).isSuccess) {
         pendingOAuth = null
         mutableState.value = mutableState.value.copy(
-          configurationError = "Could not open OAuth sign-in",
+          configurationError = AppError.OAUTH_BROWSER_OPEN_FAILED,
           isOAuthPending = false,
         )
       }
     } catch (error: Throwable) {
       mutableState.value = mutableState.value.copy(
-        configurationError = error.message ?: "Could not start OAuth sign-in",
+        configurationError = AppError.forOAuthStart(error),
       )
     }
   }
@@ -228,7 +228,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
     if (oauthCallbackInFlight) return
     val pending = pendingOAuth ?: run {
       mutableState.value = mutableState.value.copy(
-        configurationError = "No OAuth sign-in is in progress",
+        configurationError = AppError.OAUTH_NO_ACTIVE_FLOW,
       )
       return
     }
@@ -262,7 +262,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
         if (error !is NativeAuthException) pendingOAuth = null
         mutableState.value = mutableState.value.copy(
           screen = AppScreen.ONBOARDING,
-          configurationError = error.message ?: "Could not complete OAuth sign-in",
+          configurationError = AppError.OAUTH_COMPLETE_FAILED,
           isOAuthBusy = false,
           isOAuthPending = pendingOAuth != null,
         )
@@ -275,7 +275,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
     pendingOAuth = null
     oauthCallbackInFlight = false
     mutableState.value = mutableState.value.copy(
-      configurationError = "No system browser is available for OAuth sign-in",
+      configurationError = AppError.OAUTH_BROWSER_UNAVAILABLE,
       isOAuthBusy = false,
       isOAuthPending = false,
     )
@@ -452,7 +452,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
       } catch (error: Throwable) {
         if (error is CancellationException) throw error
         mutableState.value = mutableState.value.copy(
-          configurationError = error.message ?: "Could not attach the selected file",
+          configurationError = AppError.ATTACHMENT_FAILED,
         )
       }
     }
@@ -502,7 +502,7 @@ internal class HermesAppViewModel(application: Application) : AndroidViewModel(a
         if (isCurrentConnection(generation)) {
           mutableState.value = AppUiState(
             screen = AppScreen.ONBOARDING,
-            configurationError = error.message ?: "Could not connect to the gateway",
+            configurationError = AppError.CONNECTION_FAILED,
           )
         }
       }

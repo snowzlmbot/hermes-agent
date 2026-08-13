@@ -169,7 +169,11 @@ private fun OnboardingScreen(state: AppUiState, viewModel: HermesAppViewModel) {
         }
       }
       state.configurationError?.let {
-        Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("configuration-error"))
+        Text(
+          stringResource(it.messageRes),
+          color = MaterialTheme.colorScheme.error,
+          modifier = Modifier.testTag("configuration-error"),
+        )
       }
       Button(
         onClick = { viewModel.saveConnection(address, token, allowInsecure) },
@@ -259,6 +263,7 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
   var showSettings by remember { mutableStateOf(false) }
   var renameId by remember { mutableStateOf<String?>(null) }
   val context = LocalContext.current
+  val configurationErrorMessage = state.configurationError?.let { stringResource(it.messageRes) }
   val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
     if (uri != null) {
       val type = context.contentResolver.getType(uri) ?: "application/octet-stream"
@@ -267,8 +272,8 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
     }
   }
 
-  LaunchedEffect(state.configurationError, mobile?.error?.message, chat?.error, voice.error) {
-    val primaryError = state.configurationError ?: mobile?.error?.message ?: chat?.error
+  LaunchedEffect(configurationErrorMessage, mobile?.error?.message, chat?.error, voice.error) {
+    val primaryError = configurationErrorMessage ?: mobile?.error?.message ?: chat?.error
     val message = primaryError ?: voice.error
     if (!message.isNullOrBlank()) {
       snackbar.showSnackbar(message)
