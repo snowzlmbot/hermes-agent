@@ -4,13 +4,76 @@ import XCTest
 @testable import HermesMobile
 
 final class NativeOAuthTests: XCTestCase {
-    func testRejectsRemoteCleartextOAuthButAllowsLoopback() throws {
+    func testNativeAuthorizationRejectsCleartextIncludingLoopback() throws {
         let remote = try GatewayEndpoint(rawValue: "http://agent.example", allowInsecureRemote: true)
         XCTAssertThrowsError(try NativeAuthorizationRequest(endpoint: remote)) { error in
             XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
         }
         let loopback = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
-        XCTAssertNoThrow(try NativeAuthorizationRequest(endpoint: loopback))
+        XCTAssertThrowsError(try NativeAuthorizationRequest(endpoint: loopback)) { error in
+            XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
+        }
+    }
+
+    func testOAuthRequestBuildersRejectLoopbackWhileStaticTokenCleartextRemainsAvailable() throws {
+        let loopback = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        XCTAssertThrowsError(
+            try GatewayRESTRequestBuilder.nativeTokenRequest(
+                endpoint: loopback,
+                code: "authorization-code",
+                verifier: String(repeating: "v", count: 43)
+            )
+        ) { error in
+            XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
+        }
+        let tokens = NativeTokenSet(
+            accessToken: "access",
+            refreshToken: "refresh",
+            expiresAt: 1_900_000_000,
+            provider: "nous"
+        )
+        XCTAssertThrowsError(
+            try GatewayRESTRequestBuilder.request(
+                endpoint: loopback,
+                path: "api/audio/speak",
+                auth: .oauth(tokens),
+                body: ["text": "hello"]
+            )
+        ) { error in
+            XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
+        }
+        XCTAssertNoThrow(
+            try GatewayRESTRequestBuilder.request(
+                endpoint: loopback,
+                path: "api/auth/ws-ticket",
+                auth: .token("debug-token")
+            )
+        )
+    }
+
+    func testOAuthRedirectPolicyRejects307And308Destinations() throws {
+        let source = URL(string: "https://agent.example/auth/native/token")!
+        let destinations = [
+            URL(string: "http://agent.example/auth/native/token")!,
+            URL(string: "https://attacker.example/auth/native/token")!,
+            URL(string: "https://agent.example/api/other")!
+        ]
+        for statusCode in [307, 308] {
+            for destination in destinations {
+                let response = HTTPURLResponse(
+                    url: source,
+                    statusCode: statusCode,
+                    httpVersion: nil,
+                    headerFields: ["Location": destination.absoluteString]
+                )!
+                XCTAssertNil(
+                    NativeOAuthRedirectPolicy.redirectedRequest(
+                        URLRequest(url: destination),
+                        response: response
+                    )
+                )
+            }
+        }
     }
 
     func testAuthorizationURLUsesRegisteredCallbackAndPKCE() throws {

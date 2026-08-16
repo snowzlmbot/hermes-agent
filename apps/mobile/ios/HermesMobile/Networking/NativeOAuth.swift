@@ -15,6 +15,69 @@ public enum NativeOAuthError: Error, Equatable, Sendable {
     case stateMismatch
 }
 
+enum NativeOAuthTransportPolicy {
+    static func validate(endpoint: GatewayEndpoint) throws {
+        guard endpoint.baseURL.scheme?.lowercased() == "https" else {
+            throw NativeOAuthError.insecureTransport
+        }
+    }
+
+    static func validate(credentials: GatewayCredentials, endpoint: GatewayEndpoint) throws {
+        guard case .oauth = credentials.auth else { return }
+        try validate(endpoint: endpoint)
+        guard let storedEndpoint = credentials.endpoint,
+              let stored = try? GatewayEndpoint(rawValue: storedEndpoint),
+              canonicalURL(stored.baseURL) == canonicalURL(endpoint.baseURL) else {
+            throw CredentialError.endpointMismatch
+        }
+    }
+
+    static func canonicalURL(_ url: URL) -> URL? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = components.scheme?.lowercased(),
+              let host = components.host?.lowercased() else { return nil }
+        components.scheme = scheme
+        components.host = host
+        if (scheme == "https" && components.port == 443) ||
+            (scheme == "http" && components.port == 80) {
+            components.port = nil
+        }
+        components.path = components.path == "/" ? "" : components.path
+        return components.url
+    }
+}
+
+final class NativeOAuthRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    static let shared = NativeOAuthRedirectPolicy()
+
+    static func redirectedRequest(_ request: URLRequest, response: HTTPURLResponse) -> URLRequest? {
+        guard let source = response.url,
+              let destination = request.url,
+              source.scheme?.lowercased() == "https",
+              destination.scheme?.lowercased() == "https",
+              source.host?.lowercased() == destination.host?.lowercased(),
+              effectivePort(source) == effectivePort(destination),
+              source.path == destination.path,
+              destination.user == nil,
+              destination.password == nil else { return nil }
+        return request
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(Self.redirectedRequest(request, response: response))
+    }
+
+    private static func effectivePort(_ url: URL) -> Int? {
+        url.port ?? (url.scheme?.lowercased() == "https" ? 443 : nil)
+    }
+}
+
 public struct NativeOAuthProvider: Equatable, Sendable {
     public let name: String
     public let displayName: String
@@ -55,10 +118,7 @@ public struct NativeAuthorizationRequest: Equatable, Sendable {
         challenge: String,
         state: String
     ) throws {
-        let scheme = endpoint.baseURL.scheme?.lowercased()
-        let host = endpoint.baseURL.host?.lowercased()
-        let secure = scheme == "https" || (scheme == "http" && host.map(GatewayEndpoint.loopbackHosts.contains) == true)
-        guard secure else { throw NativeOAuthError.insecureTransport }
+        try NativeOAuthTransportPolicy.validate(endpoint: endpoint)
         guard !state.isEmpty, (43 ... 128).contains(verifier.count), !challenge.isEmpty else {
             throw NativeOAuthError.invalidRequest
         }

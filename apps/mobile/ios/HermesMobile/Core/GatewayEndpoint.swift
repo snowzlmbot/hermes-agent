@@ -14,12 +14,13 @@ public enum GatewayAuth: Sendable {
     case ticket(String)
     case oauth(NativeTokenSet)
     case ticketProvider(@Sendable () async throws -> String)
+    case oauthTicketProvider(@Sendable () async throws -> String)
 
     public var bearerToken: String? {
         switch self {
         case .token(let value): return value
         case .oauth(let tokens): return tokens.accessToken
-        case .ticket, .ticketProvider: return nil
+        case .ticket, .ticketProvider, .oauthTicketProvider: return nil
         }
     }
 }
@@ -85,7 +86,7 @@ public struct GatewayEndpoint: Equatable, Hashable, Sendable, Codable {
         case .ticket(let ticket): components.queryItems = [URLQueryItem(name: "ticket", value: ticket)]
         case .oauth:
             components.queryItems = []
-        case .ticketProvider:
+        case .ticketProvider, .oauthTicketProvider:
             components.queryItems = []
         }
         return components.url!

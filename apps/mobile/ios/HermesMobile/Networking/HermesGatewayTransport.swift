@@ -104,6 +104,9 @@ public actor HermesGatewayTransport {
     public func connect() async throws {
         intentionallyDisconnected = false
         guard socket == nil else { return }
+        if case .oauthTicketProvider = auth {
+            try NativeOAuthTransportPolicy.validate(endpoint: endpoint)
+        }
 
         let attempt: ConnectionAttempt
         if let current = connectionAttempt {
@@ -260,7 +263,8 @@ public actor HermesGatewayTransport {
     private static func resolveDialAuth(_ auth: GatewayAuth) async throws -> GatewayAuth {
         switch auth {
         case .token, .ticket: return auth
-        case .ticketProvider(let provider): return .ticket(try await provider())
+        case .ticketProvider(let provider), .oauthTicketProvider(let provider):
+            return .ticket(try await provider())
         case .oauth: throw GatewayTransportError.authenticationUnavailable
         }
     }

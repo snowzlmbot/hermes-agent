@@ -2,6 +2,27 @@ import XCTest
 @testable import HermesMobile
 
 final class GatewayTransportTests: XCTestCase {
+    func testOAuthTicketProviderRejectsCleartextBeforeMintOrDial() async throws {
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let tickets = TicketRecorder()
+        let sockets = SocketQueue([TestSocket()])
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .oauthTicketProvider { await tickets.next() },
+            socketFactory: { _ in sockets.next() }
+        )
+
+        do {
+            try await transport.connect()
+            XCTFail("Expected cleartext OAuth WebSocket rejection")
+        } catch {
+            XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
+        }
+        let ticketCount = await tickets.count
+        XCTAssertEqual(ticketCount, 0)
+        XCTAssertEqual(sockets.createdCount, 0)
+    }
+
     func testRequestCorrelationResolvesOutOfOrderResponsesAndPublishesEvents() async throws {
         let socket = TestSocket()
         let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")

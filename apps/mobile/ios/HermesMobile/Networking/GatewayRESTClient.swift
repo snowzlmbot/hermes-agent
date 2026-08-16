@@ -75,9 +75,13 @@ public actor GatewayRESTClient {
         endpoint: GatewayEndpoint,
         session: URLSession = .shared
     ) async throws -> [NativeOAuthProvider] {
+        try NativeOAuthTransportPolicy.validate(endpoint: endpoint)
         var request = URLRequest(url: endpoint.apiURL("api/auth/providers"))
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(
+            for: request,
+            delegate: NativeOAuthRedirectPolicy.shared
+        )
         guard let http = response as? HTTPURLResponse,
               (200 ..< 300).contains(http.statusCode),
               let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -97,7 +101,10 @@ public actor GatewayRESTClient {
             code: code,
             verifier: verifier
         )
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(
+            for: request,
+            delegate: NativeOAuthRedirectPolicy.shared
+        )
         guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
         guard (200 ..< 300).contains(http.statusCode) else {
             throw GatewayRESTError.http(http.statusCode, Self.detail(from: data))
@@ -184,11 +191,12 @@ public actor GatewayRESTClient {
         makeRequest: (StoredGatewayAuth) throws -> URLRequest
     ) async throws -> Data {
         guard !isInvalidated else { throw GatewayRESTError.expiredSession }
+        try NativeOAuthTransportPolicy.validate(credentials: credentials, endpoint: endpoint)
         try await refreshOAuthIfNeeded()
         guard !isInvalidated else { throw GatewayRESTError.expiredSession }
         let attemptedAuth = credentials.auth
         let request = try makeRequest(attemptedAuth)
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await data(for: request, auth: attemptedAuth)
         guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
         guard http.statusCode == 401 else {
             return try Self.validatedData(data, response: http)
@@ -197,11 +205,20 @@ public actor GatewayRESTClient {
         try await refreshOAuthAfterUnauthorized(authUsed: attemptedAuth)
         guard !isInvalidated else { throw GatewayRESTError.expiredSession }
         let retry = try makeRequest(credentials.auth)
-        let (retryData, retryResponse) = try await session.data(for: retry)
+        let (retryData, retryResponse) = try await data(for: retry, auth: credentials.auth)
         guard let retryHTTP = retryResponse as? HTTPURLResponse else {
             throw GatewayRESTError.invalidResponse
         }
         return try Self.validatedData(retryData, response: retryHTTP)
+    }
+
+    private func data(for request: URLRequest, auth: StoredGatewayAuth) async throws -> (Data, URLResponse) {
+        switch auth {
+        case .token:
+            return try await session.data(for: request)
+        case .oauth:
+            return try await session.data(for: request, delegate: NativeOAuthRedirectPolicy.shared)
+        }
     }
 
     private static func validatedData(_ data: Data, response: HTTPURLResponse) throws -> Data {
@@ -264,6 +281,7 @@ public actor GatewayRESTClient {
         storedEndpoint: String?,
         persist: @escaping @Sendable (GatewayCredentials) async throws -> Void
     ) async throws -> GatewayCredentials {
+        try NativeOAuthTransportPolicy.validate(endpoint: endpoint)
         var request = URLRequest(url: endpoint.apiURL("auth/native/refresh"))
         request.httpMethod = "POST"
         request.timeoutInterval = 30
@@ -273,8 +291,10 @@ public actor GatewayRESTClient {
             "refresh_token": tokens.refreshToken,
             "provider": tokens.provider
         ])
-
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(
+            for: request,
+            delegate: NativeOAuthRedirectPolicy.shared
+        )
         guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
         guard (200 ..< 300).contains(http.statusCode) else {
             if http.statusCode == 401 { throw GatewayRESTError.expiredSession }

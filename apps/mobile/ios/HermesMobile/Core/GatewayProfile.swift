@@ -190,8 +190,18 @@ public actor GatewayProfileRepository {
     public func save(profile: GatewayProfile, credentials: GatewayCredentials) async throws {
         try validate(profile)
         try validate(credentials, for: profile)
+        let previousCredentials = try await credentialStore.load()
         try await credentialStore.save(credentials)
-        try await profileStore.save(profile)
+        do {
+            try await profileStore.save(profile)
+        } catch {
+            if let previousCredentials {
+                try await credentialStore.save(previousCredentials)
+            } else {
+                try await credentialStore.delete()
+            }
+            throw error
+        }
     }
 
     public func loadStoredSessionID(for profile: GatewayProfile) async -> String? {
@@ -227,8 +237,11 @@ public actor GatewayProfileRepository {
 
     private func validate(_ credentials: GatewayCredentials, for profile: GatewayProfile) throws {
         switch (profile.authMode, credentials.auth) {
-        case (.token, .token(_)), (.oauth, .oauth(_)):
+        case (.token, .token(_)):
             return
+        case (.oauth, .oauth(_)):
+            let endpoint = try GatewayEndpoint(rawValue: profile.endpoint)
+            try NativeOAuthTransportPolicy.validate(credentials: credentials, endpoint: endpoint)
         default:
             throw CredentialError.authModeMismatch
         }

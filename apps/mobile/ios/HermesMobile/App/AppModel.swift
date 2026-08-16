@@ -583,8 +583,15 @@ public final class AppModel {
                 try await repository.save(profile: profile, credentials: updated)
             }
         )
-        let transportAuth = GatewayAuth.ticketProvider {
+        let ticketProvider: @Sendable () async throws -> String = {
             try await restClient.freshWebSocketTicket()
+        }
+        let transportAuth: GatewayAuth
+        switch credentials.auth {
+        case .token:
+            transportAuth = .ticketProvider(ticketProvider)
+        case .oauth:
+            transportAuth = .oauthTicketProvider(ticketProvider)
         }
         let transport = HermesGatewayTransport(
             endpoint: endpoint,

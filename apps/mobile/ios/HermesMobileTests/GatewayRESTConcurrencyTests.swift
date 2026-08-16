@@ -3,6 +3,50 @@ import XCTest
 @testable import HermesMobile
 
 final class GatewayRESTConcurrencyTests: XCTestCase {
+    func testOAuthClientRejectsLoopbackAndEndpointMismatchBeforeNetwork() async throws {
+        let fixture = OAuthURLProtocolFixture(ticketPolicy: .acceptRefreshedToken)
+        let session = makeSession(fixture: fixture)
+        defer {
+            session.invalidateAndCancel()
+            OAuthTestURLProtocol.fixture = nil
+        }
+        let loopback = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let tokens = NativeTokenSet(
+            accessToken: "old-access",
+            refreshToken: "old-refresh",
+            expiresAt: 0,
+            provider: "nous"
+        )
+        let insecureClient = GatewayRESTClient(
+            endpoint: loopback,
+            credentials: .oauth(tokens, endpoint: loopback.baseURL.absoluteString),
+            session: session
+        )
+        do {
+            _ = try await insecureClient.freshWebSocketTicket()
+            XCTFail("Expected cleartext OAuth rejection")
+        } catch {
+            XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
+        }
+
+        let secure = try GatewayEndpoint(rawValue: "https://agent.example")
+        let mismatchedClient = GatewayRESTClient(
+            endpoint: secure,
+            credentials: .oauth(tokens, endpoint: "https://other.example"),
+            session: session
+        )
+        do {
+            _ = try await mismatchedClient.freshWebSocketTicket()
+            XCTFail("Expected OAuth endpoint mismatch")
+        } catch {
+            XCTAssertEqual(error as? CredentialError, .endpointMismatch)
+        }
+
+        let snapshot = fixture.snapshot
+        XCTAssertEqual(snapshot.refreshCount, 0)
+        XCTAssertEqual(snapshot.ticketCount, 0)
+    }
+
     func testConcurrentExpiredTokenCallsShareRefreshAndUseNewTokenForTickets() async throws {
         let fixture = OAuthURLProtocolFixture(ticketPolicy: .acceptRefreshedToken)
         let session = makeSession(fixture: fixture)

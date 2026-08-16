@@ -104,6 +104,7 @@ public enum CredentialError: Error, Equatable, Sendable {
     case emptyToken
     case invalidEndpoint
     case authModeMismatch
+    case endpointMismatch
     case keychainFailure(OSStatusCode)
 }
 
