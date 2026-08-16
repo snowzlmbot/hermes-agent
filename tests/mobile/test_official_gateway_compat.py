@@ -34,20 +34,46 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _official_command() -> list[str] | None:
-    executable = os.environ.get("HERMES_OFFICIAL_EXECUTABLE", "").strip()
+    """Resolve the pinned official CLI without silently testing fork code."""
+    raw = os.environ.get("HERMES_OFFICIAL_EXECUTABLE", "").strip()
     python = os.environ.get("HERMES_OFFICIAL_PYTHON", "").strip()
-    if executable and python:
+    if raw and python:
         raise AssertionError("set only one of HERMES_OFFICIAL_EXECUTABLE or HERMES_OFFICIAL_PYTHON")
-    selected = executable or python
+    selected = raw or python
     if not selected:
         return None
     resolved = Path(selected).expanduser().resolve(strict=True)
-    if REPOSITORY_ROOT == resolved or REPOSITORY_ROOT in resolved.parents:
-        raise AssertionError("official Hermes executable/interpreter must be outside the fork checkout")
+
+    source_raw = os.environ.get("HERMES_OFFICIAL_SOURCE", "").strip()
+    if source_raw:
+        source = Path(source_raw).expanduser().resolve(strict=True)
+        if source == REPOSITORY_ROOT or not (source / ".git").exists():
+            raise AssertionError("official Hermes source must be a distinct Git checkout")
+        if source not in resolved.parents:
+            raise AssertionError("official Hermes executable must belong to the verified official checkout")
+        head = subprocess.run(
+            ["git", "-C", str(source), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        remote = subprocess.run(
+            ["git", "-C", str(source), "remote", "get-url", "origin"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip().removesuffix(".git")
+        if head != OFFICIAL_COMMIT or remote not in {
+            "https://github.com/NousResearch/hermes-agent",
+            "git@github.com:NousResearch/hermes-agent",
+        }:
+            raise AssertionError("official Hermes checkout identity does not match the pinned release")
+    elif REPOSITORY_ROOT == resolved or REPOSITORY_ROOT in resolved.parents:
+        raise AssertionError("official Hermes executable must not come from the fork checkout")
+
     if python:
         return [str(resolved), "-I", "-m", "hermes_cli.main"]
     return [str(resolved)]
-
 
 def _run(command: list[str], *args: str, env: dict[str, str], timeout: float = 30) -> subprocess.CompletedProcess[str]:
     return subprocess.run(

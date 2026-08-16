@@ -83,13 +83,13 @@ jobs:
               ;;
           esac
 
-      - name: Run black-box mobile compatibility E2E
+      - name: Run gateway adapter compatibility tests
         env:
           OPENROUTER_API_KEY: ""
           OPENAI_API_KEY: ""
           NOUS_API_KEY: ""
-          HERMES_OFFICIAL_HERMES: ${{ github.workspace }}/.ci/official-hermes/.venv/bin/hermes
           HERMES_OFFICIAL_EXECUTABLE: ${{ github.workspace }}/.ci/official-hermes/.venv/bin/hermes
+          HERMES_OFFICIAL_SOURCE: ${{ github.workspace }}/.ci/official-hermes
           HERMES_OFFICIAL_TAG: v2026.8.13
           HERMES_OFFICIAL_COMMIT: f80f453ae0679347e38abc917c7f94f717bf96c5
           PYTHONPATH: ""
@@ -98,5 +98,17 @@ jobs:
             python -m pytest \
             tests/mobile/test_gateway_install.py \
             tests/mobile/test_official_gateway_compat.py \
-            tests/mobile/test_official_gateway_mobile_e2e.py \
             -q --tb=short
+
+      - name: Run black-box mobile session lifecycle E2E
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+          HERMES_OFFICIAL_HERMES: ${{ github.workspace }}/.ci/official-hermes/.venv/bin/hermes
+          PYTHONPATH: ""
+        run: |
+          uv run --project .ci/official-hermes --no-sync \
+            python -m pytest \
+            tests/mobile/test_official_gateway_mobile_e2e.py \
+            -m integration -q --tb=short
