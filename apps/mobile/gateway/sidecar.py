@@ -12,7 +12,7 @@ import os
 import secrets
 import stat
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,8 +22,7 @@ import httpx
 import uvicorn
 import websockets
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import JSONResponse, Response, StreamingResponse
-from starlette.background import BackgroundTask
+from fastapi.responses import JSONResponse, Response
 
 
 BIND_HOST = "127.0.0.1"
@@ -253,35 +252,27 @@ def create_app(
 
         query_items = list(request.query_params.multi_items())
         upstream_url = httpx.URL(config.upstream_http_origin + normalized_path, params=query_items)
-        client = httpx.AsyncClient(transport=http_transport, timeout=60.0, follow_redirects=False)
-        upstream_request = client.build_request(
-            request.method,
-            upstream_url,
-            headers=_upstream_headers(
-                request,
-                internal_token=None if public_status else config.internal_token,
-            ),
-            content=request.stream(),
-        )
         try:
-            upstream_response = await client.send(upstream_request, stream=True)
+            async with httpx.AsyncClient(
+                transport=http_transport,
+                timeout=60.0,
+                follow_redirects=False,
+            ) as client:
+                upstream_response = await client.request(
+                    request.method,
+                    upstream_url,
+                    headers=_upstream_headers(
+                        request,
+                        internal_token=None if public_status else config.internal_token,
+                    ),
+                    content=await request.body(),
+                )
         except httpx.HTTPError:
-            await client.aclose()
             return JSONResponse({"detail": "Upstream unavailable"}, status_code=502)
-
-        async def body() -> AsyncIterator[bytes]:
-            async for chunk in upstream_response.aiter_raw():
-                yield chunk
-
-        async def close_upstream() -> None:
-            await upstream_response.aclose()
-            await client.aclose()
-
-        return StreamingResponse(
-            body(),
+        return Response(
+            content=upstream_response.content,
             status_code=upstream_response.status_code,
             headers=_downstream_headers(upstream_response),
-            background=BackgroundTask(close_upstream),
         )
 
     return app
