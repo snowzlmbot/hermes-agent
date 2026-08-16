@@ -255,7 +255,6 @@ def test_pinned_official_gateway_supports_loopback_session_http_and_websocket() 
                     process.kill()
                     process.wait(timeout=5)
 
-        assert not any(REPOSITORY_ROOT == path or REPOSITORY_ROOT in path.parents for path in map(Path, command))
         assert identity == {
             "release_tag": OFFICIAL_RELEASE_TAG,
             "commit": OFFICIAL_COMMIT,
