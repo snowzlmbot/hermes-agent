@@ -1,8 +1,9 @@
 package com.snowzlmbot.hermes.mobile.core
 
 import java.time.Instant
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -247,18 +248,32 @@ class GatewayRestClient(
     .apply { applyCredential(current) }
     .build()
 
-  private suspend fun executeOnce(request: Request): String = withContext(Dispatchers.IO) {
-    httpClient.newCall(request).execute().use { response ->
-      val responseBody = response.body.string()
-      if (!response.isSuccessful) {
-        val detail = runCatching { parseObject(responseBody).string("detail") }.getOrNull()
-        throw GatewayHttpException(
-          statusCode = response.code,
-          message = detail?.take(300) ?: "Gateway request failed with HTTP ${response.code}",
-        )
+  private suspend fun executeOnce(request: Request): String = suspendCancellableCoroutine { continuation ->
+    val call = httpClient.newCall(request)
+    continuation.invokeOnCancellation { call.cancel() }
+    call.enqueue(object : okhttp3.Callback {
+      override fun onFailure(call: okhttp3.Call, error: java.io.IOException) {
+        if (continuation.isActive) continuation.resumeWithException(error)
       }
-      responseBody
-    }
+
+      override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+        response.use {
+          try {
+            val responseBody = response.body.string()
+            if (!response.isSuccessful) {
+              val detail = runCatching { parseObject(responseBody).string("detail") }.getOrNull()
+              throw GatewayHttpException(
+                statusCode = response.code,
+                message = detail?.take(300) ?: "Gateway request failed with HTTP ${response.code}",
+              )
+            }
+            if (continuation.isActive) continuation.resume(responseBody)
+          } catch (error: Throwable) {
+            if (continuation.isActive) continuation.resumeWithException(error)
+          }
+        }
+      }
+    })
   }
 
   private fun parseObject(raw: String): JsonObject = runCatching {

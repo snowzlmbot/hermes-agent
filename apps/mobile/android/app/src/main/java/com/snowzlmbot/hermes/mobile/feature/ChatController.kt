@@ -9,17 +9,23 @@ import com.snowzlmbot.hermes.mobile.core.GatewayRpcException
 import com.snowzlmbot.hermes.mobile.core.ModelCatalog
 import com.snowzlmbot.hermes.mobile.core.ModelOption
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 internal enum class ConnectionPhase {
   DISCONNECTED,
@@ -126,12 +132,34 @@ internal class ChatController(
   private val onNotification: (ChatNotificationSignal) -> Unit = {},
 ) {
   private val mutableState = MutableStateFlow(MobileChatUiState())
+  private val closed = AtomicBoolean(false)
+  private val lifetimeJob = SupervisorJob(scope.coroutineContext[Job])
+  private val lifetimeScope = CoroutineScope(scope.coroutineContext + lifetimeJob)
+  private val sessionMutex = Mutex()
+  private val sessionsDirty = AtomicBoolean(false)
+  private val sessionRefreshRequests = Channel<Unit>(Channel.CONFLATED)
+  private val connectionGeneration = AtomicLong(0)
   private val sessionOperationGeneration = AtomicLong(0)
+  private val sessionMutationGeneration = AtomicLong(0)
   private val modelControlOperationGeneration = AtomicLong(0)
-  private val sessionListGeneration = AtomicLong(0)
-  private val eventJob: Job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+  private val sessionRefreshJob: Job = lifetimeScope.launch(start = CoroutineStart.UNDISPATCHED) {
+    for (request in sessionRefreshRequests) {
+      sessionMutex.withLock {
+        if (!closed.get() && mutableState.value.phase == ConnectionPhase.CONNECTED) refreshSessionsLocked()
+      }
+    }
+  }
+  private val eventJob: Job = lifetimeScope.launch(start = CoroutineStart.UNDISPATCHED) {
     runtime.events.collect { event ->
       val current = mutableState.value
+      if (event.type == GatewayEventType.SESSIONS_CHANGED) {
+        when (current.phase) {
+          ConnectionPhase.CONNECTING -> sessionsDirty.set(true)
+          ConnectionPhase.CONNECTED -> sessionRefreshRequests.trySend(Unit)
+          ConnectionPhase.DISCONNECTED -> Unit
+        }
+        return@collect
+      }
       val runtimeId = current.chat.runtimeSessionId
       val storedId = current.chat.storedSessionId
       if (runtimeId != null && event.runtimeSessionId != null && event.runtimeSessionId != runtimeId) {
@@ -163,65 +191,58 @@ internal class ChatController(
 
   val state: StateFlow<MobileChatUiState> = mutableState.asStateFlow()
 
-  suspend fun connect(): Boolean {
+  suspend fun connect(): Boolean = runInLifetime(false) {
+    val generation = connectionGeneration.incrementAndGet()
     mutableState.value = mutableState.value.copy(phase = ConnectionPhase.CONNECTING, error = null)
-    return try {
+    try {
       runtime.connect()
-      val sessions = runtime.listSessions(includeArchived = true)
-      mutableState.value = mutableState.value.copy(
-        phase = ConnectionPhase.CONNECTED,
-        sessions = sessions.sortedForDisplay(),
-        error = null,
-      )
+      sessionMutex.withLock {
+        if (!isCurrentConnection(generation)) return@withLock
+        val sessions = runtime.listSessions(includeArchived = true)
+        if (!isCurrentConnection(generation)) return@withLock
+        mutableState.value = mutableState.value.copy(
+          phase = ConnectionPhase.CONNECTED,
+          sessions = sessions.sortedForDisplay(),
+          error = null,
+        )
+      }
+      if (!isCurrentConnection(generation)) return@runInLifetime false
+      if (sessionsDirty.getAndSet(false)) sessionRefreshRequests.trySend(Unit)
       true
     } catch (error: Throwable) {
-      mutableState.value = mutableState.value.copy(
-        phase = ConnectionPhase.DISCONNECTED,
-        error = error.toUiError(),
-      )
+      if (error is CancellationException) throw error
+      if (isCurrentConnection(generation)) {
+        mutableState.value = mutableState.value.copy(
+          phase = ConnectionPhase.DISCONNECTED,
+          error = error.toUiError(),
+        )
+      }
       false
     }
   }
 
   suspend fun connectAndRestore(): Boolean {
-    if (!connect()) return false
+    if (closed.get() || !connect()) return false
     val storedId = selectionStore.load()?.takeIf(String::isNotBlank)
       ?: return newSession()
     if (storedId.isBlank()) return newSession()
     return openSession(storedId)
   }
 
-  suspend fun refreshSessions() {
-    val generation = sessionListGeneration.incrementAndGet()
-    try {
-      val sessions = runtime.listSessions(includeArchived = true).sortedForDisplay()
-      if (sessionListGeneration.get() != generation) return
-      mutableState.value = mutableState.value.copy(sessions = sessions, error = null)
-    } catch (error: Throwable) {
-      if (sessionListGeneration.get() == generation) {
-        mutableState.value = mutableState.value.copy(error = error.toUiError())
-      }
-    }
+  suspend fun refreshSessions() = runInLifetime(Unit) {
+    sessionMutex.withLock { refreshSessionsLocked() }
   }
 
-  suspend fun restoreSession(storedId: String) {
+  suspend fun restoreSession(storedId: String) = runInLifetime(Unit) {
     val id = storedId.trim()
-    if (id.isEmpty()) return
-    val generation = sessionListGeneration.incrementAndGet()
-    try {
-      runtime.updateSession(id, archived = false)
-      if (sessionListGeneration.get() != generation) return
-      val sessions = runtime.listSessions(includeArchived = true).sortedForDisplay()
-      if (sessionListGeneration.get() != generation) return
-      mutableState.value = mutableState.value.copy(sessions = sessions, error = null)
-    } catch (error: Throwable) {
-      if (sessionListGeneration.get() == generation) {
-        mutableState.value = mutableState.value.copy(error = error.toUiError())
-      }
-    }
+    if (id.isNotEmpty()) runSessionMutation { runtime.updateSession(id, archived = false) }
   }
 
-  suspend fun newSession(): Boolean {
+  suspend fun newSession(): Boolean = runInLifetime(false) {
+    createNewSession()
+  }
+
+  private suspend fun createNewSession(preservedError: MobileUiError? = null): Boolean {
     val generation = sessionOperationGeneration.incrementAndGet()
     modelControlOperationGeneration.incrementAndGet()
     mutableState.value = mutableState.value.copy(
@@ -230,26 +251,30 @@ internal class ChatController(
     )
     return try {
       val active = runtime.createSession()
-      if (sessionOperationGeneration.get() != generation) return false
+      if (closed.get() || sessionOperationGeneration.get() != generation) return false
       mutableState.value = mutableState.value.copy(
         chat = active.toChatState(),
         modelCatalog = ModelCatalog(),
         isLoadingModelOptions = false,
         pendingModelConfirmation = null,
-        error = null,
+        error = preservedError,
       )
       selectionStore.save(active.storedId)
       true
     } catch (error: Throwable) {
       if (error is CancellationException) throw error
-      if (sessionOperationGeneration.get() == generation) {
+      if (!closed.get() && sessionOperationGeneration.get() == generation) {
         mutableState.value = mutableState.value.copy(error = error.toUiError())
       }
       false
     }
   }
 
-  suspend fun openSession(storedId: String): Boolean {
+  suspend fun openSession(storedId: String): Boolean = runInLifetime(false) {
+    openSessionInternal(storedId)
+  }
+
+  private suspend fun openSessionInternal(storedId: String): Boolean {
     if (storedId.isBlank()) return false
     val generation = sessionOperationGeneration.incrementAndGet()
     modelControlOperationGeneration.incrementAndGet()
@@ -259,7 +284,7 @@ internal class ChatController(
     )
     return try {
       val active = runtime.resumeSession(storedId)
-      if (sessionOperationGeneration.get() != generation) return false
+      if (closed.get() || sessionOperationGeneration.get() != generation) return false
       mutableState.value = mutableState.value.copy(
         chat = active.toChatState(),
         modelCatalog = ModelCatalog(),
@@ -271,11 +296,13 @@ internal class ChatController(
       true
     } catch (error: Throwable) {
       if (error is CancellationException) throw error
-      if (error is GatewayRpcException && error.code == 4007 && sessionOperationGeneration.get() == generation) {
+      if (error is GatewayRpcException && error.code == 4007 &&
+        !closed.get() && sessionOperationGeneration.get() == generation
+      ) {
         selectionStore.clear()
-        return newSession()
+        return createNewSession()
       }
-      if (sessionOperationGeneration.get() == generation) {
+      if (!closed.get() && sessionOperationGeneration.get() == generation) {
         mutableState.value = mutableState.value.copy(error = error.toUiError())
       }
       false
@@ -283,11 +310,13 @@ internal class ChatController(
   }
 
   suspend fun send(text: String) {
+    if (closed.get()) return
     val cleanText = text.trim()
     val runtimeId = mutableState.value.chat.runtimeSessionId
     if (cleanText.isEmpty() || runtimeId.isNullOrBlank()) return
     try {
       runtime.submitPrompt(runtimeId, cleanText)
+      if (closed.get()) return
       mutableState.value = mutableState.value.copy(error = null)
     } catch (error: Throwable) {
       mutableState.value = mutableState.value.copy(error = error.toUiError())
@@ -295,15 +324,18 @@ internal class ChatController(
   }
 
   suspend fun stop() {
+    if (closed.get()) return
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
     try {
       runtime.interrupt(runtimeId)
+      if (closed.get()) return
     } catch (error: Throwable) {
       mutableState.value = mutableState.value.copy(error = error.toUiError())
     }
   }
 
   suspend fun refreshModelOptions(forceRefresh: Boolean = false) {
+    if (closed.get()) return
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
     val generation = modelControlOperationGeneration.incrementAndGet()
     mutableState.value = mutableState.value.copy(isLoadingModelOptions = true)
@@ -332,6 +364,7 @@ internal class ChatController(
   }
 
   suspend fun selectModel(option: ModelOption, confirmExpensiveModel: Boolean = false) {
+    if (closed.get()) return
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
     val generation = modelControlOperationGeneration.incrementAndGet()
     mutableState.value = if (confirmExpensiveModel) {
@@ -375,15 +408,18 @@ internal class ChatController(
   }
 
   suspend fun confirmModelSelection() {
+    if (closed.get()) return
     val pending = mutableState.value.pendingModelConfirmation ?: return
     selectModel(pending.option, confirmExpensiveModel = true)
   }
 
   fun cancelModelSelection() {
+    if (closed.get()) return
     mutableState.value = mutableState.value.copy(pendingModelConfirmation = null)
   }
 
   suspend fun setReasoningEffort(effort: String) {
+    if (closed.get()) return
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
     val generation = modelControlOperationGeneration.incrementAndGet()
     mutableState.value = mutableState.value.copy(isLoadingModelOptions = false)
@@ -404,26 +440,31 @@ internal class ChatController(
   }
 
   suspend fun respondApproval(choice: String) {
+    if (closed.get()) return
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
     runOperation { runtime.respondApproval(runtimeId, choice) }
   }
 
   suspend fun respondClarify(requestId: String, answer: String) {
+    if (closed.get()) return
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
     runOperation { runtime.respondClarify(runtimeId, requestId, answer) }
   }
 
   suspend fun respondSecret(requestId: String, value: String) {
+    if (closed.get()) return
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
     runOperation { runtime.respondSecret(runtimeId, requestId, value) }
   }
 
   suspend fun respondSudo(requestId: String, password: String) {
+    if (closed.get()) return
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return
     runOperation { runtime.respondSudo(runtimeId, requestId, password) }
   }
 
   suspend fun attach(method: String, params: Map<String, String>): String? {
+    if (closed.get()) return null
     val runtimeId = mutableState.value.chat.runtimeSessionId ?: return null
     var reference: String? = null
     runOperation { reference = runtime.attach(runtimeId, method, params) }
@@ -435,30 +476,43 @@ internal class ChatController(
     title: String? = null,
     archived: Boolean? = null,
     pinned: Boolean? = null,
-  ) {
-    runOperation { runtime.updateSession(storedId, title, archived, pinned) }
-    refreshSessions()
+  ) = runInLifetime(Unit) {
+    runSessionMutation { runtime.updateSession(storedId, title, archived, pinned) }
   }
 
   suspend fun setPinned(storedId: String, pinned: Boolean) {
     updateSession(storedId, pinned = pinned)
   }
 
-  suspend fun deleteSession(storedId: String) {
-    runOperation { runtime.deleteSession(storedId) }
-    refreshSessions()
-    if (mutableState.value.chat.storedSessionId == storedId) newSession()
+  suspend fun deleteSession(storedId: String) = runInLifetime(Unit) {
+    val activeGeneration = sessionOperationGeneration.get()
+    val outcome = runSessionMutation { runtime.deleteSession(storedId) }
+    if (outcome !is SessionMutationOutcome.Committed) return@runInLifetime
+    if (outcome.refreshError != null) {
+      mutableState.value = mutableState.value.copy(
+        sessions = mutableState.value.sessions.filterNot { it.storedId == storedId },
+      )
+    }
+    if (sessionOperationGeneration.get() == activeGeneration &&
+      mutableState.value.chat.storedSessionId == storedId
+    ) {
+      createNewSession(preservedError = outcome.refreshError)
+    }
   }
 
   fun clearError() {
+    if (closed.get()) return
     mutableState.value = mutableState.value.copy(error = null)
   }
 
   fun close() {
+    if (!closed.compareAndSet(false, true)) return
+    connectionGeneration.incrementAndGet()
     sessionOperationGeneration.incrementAndGet()
+    sessionMutationGeneration.incrementAndGet()
     modelControlOperationGeneration.incrementAndGet()
-    sessionListGeneration.incrementAndGet()
-    eventJob.cancel()
+    sessionRefreshRequests.close()
+    lifetimeJob.cancel(CancellationException("Chat controller closed"))
     runtime.close()
   }
 
@@ -473,12 +527,64 @@ internal class ChatController(
   }
 
   private suspend fun runOperation(operation: suspend () -> Unit) {
+    if (closed.get()) return
     try {
       operation()
+      if (closed.get()) return
       mutableState.value = mutableState.value.copy(error = null)
     } catch (error: Throwable) {
       mutableState.value = mutableState.value.copy(error = error.toUiError())
     }
+  }
+
+  private suspend fun refreshSessionsLocked(): MobileUiError? = try {
+    val sessions = runtime.listSessions(includeArchived = true).sortedForDisplay()
+    if (!closed.get()) mutableState.value = mutableState.value.copy(sessions = sessions, error = null)
+    null
+  } catch (error: Throwable) {
+    if (error is CancellationException) throw error
+    val uiError = error.toUiError()
+    if (!closed.get()) mutableState.value = mutableState.value.copy(error = uiError)
+    uiError
+  }
+
+  private suspend fun runSessionMutation(operation: suspend () -> Unit): SessionMutationOutcome =
+    sessionMutex.withLock {
+      if (closed.get()) throw CancellationException("Chat controller closed")
+      val generation = sessionMutationGeneration.incrementAndGet()
+      try {
+        operation()
+      } catch (error: Throwable) {
+        if (error is CancellationException) throw error
+        if (!closed.get() && sessionMutationGeneration.get() == generation) {
+          mutableState.value = mutableState.value.copy(error = error.toUiError())
+        }
+        return@withLock SessionMutationOutcome.Failed
+      }
+
+      val refreshError = refreshSessionsLocked()
+      SessionMutationOutcome.Committed(refreshError)
+    }
+
+  private suspend fun <T> runInLifetime(closedResult: T, operation: suspend () -> T): T {
+    if (closed.get()) return closedResult
+    val task = lifetimeScope.async(start = CoroutineStart.UNDISPATCHED) {
+      if (closed.get()) closedResult else operation()
+    }
+    return try {
+      task.await()
+    } catch (error: CancellationException) {
+      task.cancel(error)
+      throw error
+    }
+  }
+
+  private fun isCurrentConnection(generation: Long): Boolean =
+    !closed.get() && connectionGeneration.get() == generation
+
+  private sealed interface SessionMutationOutcome {
+    data object Failed : SessionMutationOutcome
+    data class Committed(val refreshError: MobileUiError?) : SessionMutationOutcome
   }
 
   private fun notificationKind(type: GatewayEventType): NotificationKind? = when (type) {
@@ -489,7 +595,8 @@ internal class ChatController(
   }
 
   private fun isCurrentModelControlOperation(generation: Long, runtimeId: String): Boolean =
-    modelControlOperationGeneration.get() == generation && mutableState.value.chat.runtimeSessionId == runtimeId
+    !closed.get() && modelControlOperationGeneration.get() == generation &&
+      mutableState.value.chat.runtimeSessionId == runtimeId
 
   private fun ActiveSession.toChatState(): ChatState = ChatState(
     runtimeSessionId = runtimeId,
