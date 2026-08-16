@@ -112,6 +112,7 @@ def _json_request(
         request.add_header("Content-Type", "application/json")
     if token is not None:
         request.add_header(TOKEN_HEADER, token)
+        request.add_header("Authorization", f"Bearer {token}")
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         with opener.open(request, timeout=5) as response:
