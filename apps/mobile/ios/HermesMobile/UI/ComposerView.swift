@@ -4,6 +4,7 @@ struct ComposerView: View {
     @Binding var text: String
     let isStreaming: Bool
     let isRecording: Bool
+    let isTranscribing: Bool
     let onSend: () -> Void
     let onStop: () -> Void
     let onAttachPhoto: () -> Void
@@ -52,6 +53,7 @@ struct ComposerView: View {
                         .foregroundStyle(isRecording ? .red : .primary)
                 }
                 .buttonStyle(.bordered)
+                .disabled(isTranscribing)
                 .accessibilityLabel(isRecording ? String(localized: "action.stop.recording") : String(localized: "action.record"))
 
                 if isStreaming {

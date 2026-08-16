@@ -78,6 +78,19 @@ final class AudioInteractionModelTests: XCTestCase {
         XCTAssertEqual(model.errorMessage, String(localized: "audio.playback.error"))
     }
 
+    func testRecordingCannotRestartWhileTranscribing() async {
+        let recorder = FakeRecordingService()
+        let client = FakeAudioClient(transcriptionDelay: .milliseconds(50))
+        let model = AudioInteractionModel(recordingService: recorder, playbackService: FakePlaybackService())
+        await model.startRecording(using: client) { _ in }
+        let pending = Task { await model.stopAndTranscribe(using: client) }
+        await Task.yield()
+        XCTAssertTrue(model.isTranscribing)
+        await model.startRecording(using: client) { _ in }
+        XCTAssertEqual(recorder.startCallCount, 1)
+        _ = await pending.value
+    }
+
     func testRecordingAutomaticallyStopsAtConfiguredDuration() async throws {
         let recorder = FakeRecordingService()
         XCTAssertEqual(
@@ -171,15 +184,22 @@ private final class FakePlaybackService: AudioPlaybackServiceProtocol {
 private actor FakeAudioClient: AudioTranscriptionClient {
     private let transcript: String
     private let transcriptionError: FakeError?
+    private let transcriptionDelay: Duration?
     private(set) var transcriptionCallCount = 0
 
-    init(transcript: String = "transcript", transcriptionError: FakeError? = nil) {
+    init(
+        transcript: String = "transcript",
+        transcriptionError: FakeError? = nil,
+        transcriptionDelay: Duration? = nil
+    ) {
         self.transcript = transcript
         self.transcriptionError = transcriptionError
+        self.transcriptionDelay = transcriptionDelay
     }
 
     func transcription(dataURL: String, mimeType: String) async throws -> String {
         transcriptionCallCount += 1
+        if let transcriptionDelay { try await Task.sleep(for: transcriptionDelay) }
         if let transcriptionError { throw transcriptionError }
         return transcript
     }

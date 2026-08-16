@@ -144,6 +144,7 @@ public final class AudioInteractionModel {
         using client: any AudioTranscriptionClient,
         onTranscript: @escaping @MainActor @Sendable (String) -> Void
     ) async {
+        guard !isRecording, !isTranscribing else { return }
         recordingLimitTask?.cancel()
         recordingLimitTask = nil
         do {

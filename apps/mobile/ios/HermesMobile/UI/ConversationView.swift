@@ -35,6 +35,7 @@ struct ConversationView: View {
                         text: $composerText,
                         isStreaming: chat.state.isStreaming,
                         isRecording: audioModel.isRecording,
+                        isTranscribing: audioModel.isTranscribing,
                         onSend: send,
                         onStop: stop,
                         onAttachPhoto: { showingPhotoPicker = true },
