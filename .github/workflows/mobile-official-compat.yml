@@ -1,0 +1,92 @@
+name: Mobile Official Gateway Compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - apps/mobile/**
+      - tests/mobile/test_official_gateway_mobile_e2e.py
+      - .github/workflows/mobile-official-compat.yml
+  pull_request:
+    paths:
+      - apps/mobile/**
+      - tests/mobile/test_official_gateway_mobile_e2e.py
+      - .github/workflows/mobile-official-compat.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-official-compat-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  official-gateway:
+    name: Mobile against official Hermes gateway
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout mobile candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout official Hermes source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: NousResearch/hermes-agent
+          ref: v2026.8.13 # peeled commit f80f453ae0679347e38abc917c7f94f717bf96c5
+          path: .ci/official-hermes
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "0.9.28"
+          enable-cache: true
+          cache-dependency-glob: |
+            .ci/official-hermes/pyproject.toml
+            .ci/official-hermes/uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install official locked test environment
+        run: >-
+          uv sync --locked --project .ci/official-hermes --python 3.11
+          --extra all --extra dev
+
+      - name: Verify and record official Hermes release pin
+        env:
+          OFFICIAL_HERMES_TAG: v2026.8.13
+          OFFICIAL_HERMES_COMMIT: f80f453ae0679347e38abc917c7f94f717bf96c5
+        run: |
+          actual_commit="$(git -C .ci/official-hermes rev-parse HEAD)"
+          tag_commit="$(git -C .ci/official-hermes rev-parse --verify "refs/tags/${OFFICIAL_HERMES_TAG}^{commit}")"
+          printf 'official-hermes-tag=%s\n' "$OFFICIAL_HERMES_TAG"
+          printf 'official-hermes-commit=%s\n' "$actual_commit"
+          test "$actual_commit" = "$OFFICIAL_HERMES_COMMIT"
+          test "$tag_commit" = "$OFFICIAL_HERMES_COMMIT"
+
+          version="$(${{ github.workspace }}/.ci/official-hermes/.venv/bin/hermes --version 2>&1)"
+          printf 'official-hermes-version=%s\n' "$version"
+          case "$version" in
+            *v0.20.1*2026.8.13*|*2026.8.13*v0.20.1*) ;;
+            *)
+              printf 'unexpected official Hermes version: %s\n' "$version" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Run black-box mobile compatibility E2E
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+          HERMES_OFFICIAL_HERMES: ${{ github.workspace }}/.ci/official-hermes/.venv/bin/hermes
+          PYTHONPATH: ""
+        run: >-
+          uv run --project .ci/official-hermes --no-sync
+          python -m pytest tests/mobile/test_official_gateway_mobile_e2e.py
+          -m integration -q --tb=short
