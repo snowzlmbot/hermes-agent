@@ -102,3 +102,65 @@ jobs:
             ${{ runner.temp }}/HermesMobileRelease/Build/Products/Release-iphonesimulator/HermesMobile.app
           if-no-files-found: warn
           retention-days: 14
+
+  ios_archive:
+    name: iOS unsigned Release xcarchive
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install XcodeGen
+        env:
+          XCODEGEN_VERSION: "2.46.0"
+          XCODEGEN_SHA256: "4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806"
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/xcodegen.zip"
+          curl --fail --location --retry 3 \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/${XCODEGEN_VERSION}/xcodegen.zip" \
+            --output "$archive"
+          printf '%s  %s\n' "$XCODEGEN_SHA256" "$archive" | shasum -a 256 -c -
+          unzip -q "$archive" -d "$RUNNER_TEMP/xcodegen"
+          xcodegen_bin="$RUNNER_TEMP/xcodegen/xcodegen/bin/xcodegen"
+          test -f "$xcodegen_bin"
+          chmod +x "$xcodegen_bin"
+          echo "$(dirname "$xcodegen_bin")" >> "$GITHUB_PATH"
+          "$xcodegen_bin" --version
+      - name: Generate project
+        working-directory: apps/mobile/ios
+        run: xcodegen generate
+      - name: Create unsigned iPhoneOS archive
+        working-directory: apps/mobile/ios
+        run: |
+          xcodebuild \
+            -project HermesMobile.xcodeproj \
+            -scheme HermesMobile \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/HermesMobile-${{ github.sha }}.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+      - name: Verify unsigned iOS archive
+        run: |
+          set -o pipefail
+          archive="$RUNNER_TEMP/HermesMobile-${{ github.sha }}.xcarchive"
+          report="$RUNNER_TEMP/HermesMobile-${{ github.sha }}-xcarchive-verification.txt"
+          executable="$archive/Products/Applications/HermesMobile.app/HermesMobile"
+          python3 apps/mobile/test-server/verify_ios_xcarchive.py "$archive" | tee "$report"
+          xcrun vtool -show-build "$executable" | tee -a "$report"
+          grep -Eq '^[[:space:]]*platform[[:space:]]+IOS[[:space:]]*$' "$report"
+      - name: Upload unsigned iOS archive
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: hermes-mobile-ios-archive-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/HermesMobile-${{ github.sha }}.xcarchive
+            ${{ runner.temp }}/HermesMobile-${{ github.sha }}-xcarchive-verification.txt
+          if-no-files-found: error
+          retention-days: 14

@@ -30,6 +30,10 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "0.9.28"
       - name: Verify contract fixture
         run: bash apps/mobile/scripts/verify.sh --contract-only
       - name: Verify source transport policies
@@ -38,3 +42,9 @@ jobs:
           python3 apps/mobile/test-server/verify_ios_transport_plist.py Release apps/mobile/ios/HermesMobile/Resources/Info.plist
           python3 apps/mobile/test-server/verify_ios_transport_plist.py Debug apps/mobile/ios/HermesMobile/Resources/Info-Debug.plist
           python3 apps/mobile/test-server/verify_ios_plist_parity.py apps/mobile/ios/HermesMobile/Resources/Info.plist apps/mobile/ios/HermesMobile/Resources/Info-Debug.plist
+      - name: Verify mobile workflow policy
+        run: |
+          uv run --no-project --with pyyaml==6.0.3 \
+            python -m unittest \
+            apps/mobile/test-server/test_mobile_workflow.py \
+            apps/mobile/test-server/test_verify_ios_xcarchive.py
