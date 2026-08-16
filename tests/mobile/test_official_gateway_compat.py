@@ -42,38 +42,63 @@ def _official_command() -> list[str] | None:
     selected = raw or python
     if not selected:
         return None
-    resolved = Path(selected).expanduser().resolve(strict=True)
+    selected_path = Path(os.path.abspath(Path(selected).expanduser()))
+    resolved_target = selected_path.resolve(strict=True)
+    assert resolved_target.is_file() and os.access(selected_path, os.X_OK)
 
     source_raw = os.environ.get("HERMES_OFFICIAL_SOURCE", "").strip()
-    if source_raw:
-        source = Path(source_raw).expanduser().resolve(strict=True)
-        if source == REPOSITORY_ROOT or not (source / ".git").exists():
-            raise AssertionError("official Hermes source must be a distinct Git checkout")
-        if source not in resolved.parents:
-            raise AssertionError("official Hermes executable must belong to the verified official checkout")
-        head = subprocess.run(
-            ["git", "-C", str(source), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        remote = subprocess.run(
-            ["git", "-C", str(source), "remote", "get-url", "origin"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip().removesuffix(".git")
-        if head != OFFICIAL_COMMIT or remote not in {
-            "https://github.com/NousResearch/hermes-agent",
-            "git@github.com:NousResearch/hermes-agent",
-        }:
-            raise AssertionError("official Hermes checkout identity does not match the pinned release")
-    elif REPOSITORY_ROOT == resolved or REPOSITORY_ROOT in resolved.parents:
-        raise AssertionError("official Hermes executable must not come from the fork checkout")
+    if not source_raw:
+        raise AssertionError("HERMES_OFFICIAL_SOURCE must name the distinct official checkout")
+    source = Path(source_raw).expanduser().resolve(strict=True)
+    if source == REPOSITORY_ROOT or not (source / ".git").exists():
+        raise AssertionError("official Hermes source must be a distinct Git checkout")
+    if source not in selected_path.parents:
+        raise AssertionError("official Hermes executable must belong to the verified official checkout")
+    head = subprocess.run(
+        ["git", "-C", str(source), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    tag_commit = subprocess.run(
+        ["git", "-C", str(source), "rev-parse", f"refs/tags/{OFFICIAL_RELEASE_TAG}^{{commit}}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    remote = subprocess.run(
+        ["git", "-C", str(source), "remote", "get-url", "origin"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip().removesuffix(".git").removesuffix("/")
+    if head != OFFICIAL_COMMIT or tag_commit != OFFICIAL_COMMIT or remote not in {
+        "https://github.com/NousResearch/hermes-agent",
+        "git@github.com:NousResearch/hermes-agent",
+    }:
+        raise AssertionError("official Hermes checkout identity does not match the pinned release")
+
+    interpreter = selected_path
+    if python:
+        interpreter = selected_path
+    else:
+        try:
+            first_line = selected_path.open("rb").readline(4096).decode("utf-8").strip()
+            if not first_line.startswith("#!"):
+                raise AssertionError("official Hermes launcher must expose its environment interpreter")
+            shebang = first_line[2:].split()
+            if len(shebang) != 1:
+                raise AssertionError("official Hermes launcher has an ambiguous interpreter")
+            interpreter = Path(os.path.abspath(shebang[0]))
+        except UnicodeDecodeError as error:
+            raise AssertionError("official Hermes launcher is not a text wrapper") from error
+    if source not in interpreter.parents:
+        raise AssertionError("official Hermes interpreter must belong to the verified official checkout")
+    assert interpreter.resolve(strict=True).is_file() and os.access(interpreter, os.X_OK)
 
     if python:
-        return [str(resolved), "-I", "-m", "hermes_cli.main"]
-    return [str(resolved)]
+        return [str(selected_path), "-I", "-m", "hermes_cli.main"]
+    return [str(selected_path)]
 
 def _run(command: list[str], *args: str, env: dict[str, str], timeout: float = 30) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -145,10 +170,10 @@ def _wait_ready(process: subprocess.Popen[bytes], base_url: str, log_path: Path)
     raise AssertionError(f"official hermes serve did not become ready ({last_error}): {output}")
 
 
-def _assert_websocket_upgrade(host: str, port: int, token: str) -> None:
+def _assert_websocket_upgrade(host: str, port: int, internal_token: str) -> None:
     websocket_key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
     request = (
-        f"GET /api/ws?token={token} HTTP/1.1\r\n"
+        f"GET /api/ws?token={internal_token} HTTP/1.1\r\n"
         f"Host: {host}:{port}\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
@@ -181,6 +206,21 @@ def _assert_pinned_identity(command: list[str], env: dict[str, str]) -> dict[str
     assert result.returncode == 0, result.stdout + result.stderr
     version = _version_from(result.stdout + result.stderr)
     assert version == OFFICIAL_VERSION
+    source = Path(os.environ["HERMES_OFFICIAL_SOURCE"]).resolve(strict=True)
+    interpreter = Path(command[0])
+    if len(command) == 1:
+        first_line = interpreter.open("rb").readline(4096).decode("utf-8").strip()
+        interpreter = Path(first_line[2:].split()[0])
+    imported = subprocess.run(
+        [str(interpreter), "-I", "-c", "import hermes_cli; print(hermes_cli.__file__)"],
+        cwd=env["HERMES_OFFICIAL_NEUTRAL_CWD"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    imported_path = Path(imported).resolve(strict=True)
+    assert source in imported_path.parents, f"hermes_cli imported outside official checkout: {imported_path}"
     executable_hash = hashlib.sha256(Path(command[0]).read_bytes()).hexdigest()
     return {
         "release_tag": supplied_tag,
@@ -204,7 +244,7 @@ def test_pinned_official_gateway_supports_loopback_session_http_and_websocket() 
         home.mkdir(mode=0o700)
         hermes_home.mkdir(mode=0o700)
         neutral_cwd.mkdir(mode=0o700)
-        token = secrets.token_hex(32)
+        internal_token = secrets.token_hex(32)
         port = _free_loopback_port()
         base_url = f"http://127.0.0.1:{port}"
         log_path = root / "official-hermes.log"
@@ -214,7 +254,7 @@ def test_pinned_official_gateway_supports_loopback_session_http_and_websocket() 
             {
                 "HOME": str(home),
                 "HERMES_HOME": str(hermes_home),
-                "HERMES_DASHBOARD_SESSION_TOKEN": token,
+                "HERMES_DASHBOARD_SESSION_TOKEN": internal_token,
                 "HERMES_OFFICIAL_NEUTRAL_CWD": str(neutral_cwd),
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "OPENROUTER_API_KEY": "",
@@ -245,7 +285,7 @@ def test_pinned_official_gateway_supports_loopback_session_http_and_websocket() 
 
             unauthorized_status, _ = _json_request(f"{base_url}/api/sessions")
             assert unauthorized_status == 401
-            _assert_websocket_upgrade("127.0.0.1", port, token)
+            _assert_websocket_upgrade("127.0.0.1", port, internal_token)
         finally:
             if process.poll() is None:
                 process.terminate()

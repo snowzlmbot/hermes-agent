@@ -1,20 +1,48 @@
 # Hermes Mobile test builds
 
-The mobile clients connect to an existing official Hermes Agent gateway. The first-test compatibility path uses the official session-token REST/WebSocket protocol; native OAuth remains optional.
+The mobile clients connect through the independent Hermes Mobile sidecar in
+[`gateway/README.md`](./gateway/README.md). The sidecar is the only TLS-ingress
+target: it listens on `127.0.0.1:9120`, bridges to an unchanged official
+Hermes `v0.20.1` gateway on `127.0.0.1:9119`, and keeps the two credentials
+separate.
+
+## Mobile authentication contract
+
+Token-mode clients must keep the long-lived pairing credential in the HTTPS
+`X-Hermes-Session-Token` header. It must never be put in a URL. Before every
+WebSocket connection or reconnect, the client calls:
+
+```text
+POST /api/auth/ws-ticket
+X-Hermes-Session-Token: <pairing-credential>
+```
+
+The sidecar returns a 30-second single-use ticket. The client then connects
+using only:
+
+```text
+wss://<ingress>/api/ws?ticket=<short-lived-ticket>
+```
+
+`GET /api/status` is public. Other REST requests use the same HTTPS header;
+the sidecar strips that header before forwarding and injects a distinct
+loopback-only credential for official Hermes. OAuth flows retain their own
+native ticket exchange and do not reuse the pairing credential in a URL.
 
 ## Download the Android test build
 
-The stable build entry is the **Mobile Android** Actions page on the delivery branch:
+The stable build entry is the **Mobile Android** Actions page on the delivery
+branch:
 
 <https://github.com/snowzlmbot/hermes-agent/actions/workflows/mobile-android.yml?query=branch%3Ahermes-agent-Mobile-app>
 
 1. Open the newest successful run whose branch is `hermes-agent-Mobile-app`.
-2. Record the run's commit SHA.
-3. Download the artifact named `hermes-mobile-android-<commit-sha>`.
-4. Use the Debug APK for test installation. The Release output is a verification build and may be unsigned.
-5. Keep the Actions run URL and commit SHA with test results. Artifacts currently expire after 14 days.
+2. Record the run commit SHA.
+3. Download `hermes-mobile-android-<commit-sha>`.
+4. Use the Debug APK for test installation. The Release output is a
+   verification build and may be unsigned.
 
-With GitHub CLI, list the stable-branch runs and then download the selected exact-SHA artifact:
+With GitHub CLI:
 
 ```bash
 gh run list \
@@ -30,7 +58,8 @@ gh run download RUN_ID \
   --dir hermes-mobile-android-COMMIT_SHA
 ```
 
-Install the downloaded Debug APK on a test device only after verifying the run and artifact came from the expected commit:
+Install only after verifying the run and artifact came from the expected
+commit:
 
 ```bash
 adb install -r path/to/app-debug.apk
@@ -42,19 +71,15 @@ The stable **Mobile iOS** Actions page is:
 
 <https://github.com/snowzlmbot/hermes-agent/actions/workflows/mobile.yml?query=branch%3Ahermes-agent-Mobile-app>
 
-Its current artifacts contain simulator/unsigned verification output, not a signed App Store or physical-device distribution. Use the artifact whose name embeds the exact run commit SHA.
+Current artifacts contain simulator/unsigned verification output, not a
+signed App Store or physical-device distribution. Use the artifact whose name
+embeds the exact run commit SHA.
 
-## Prepare an official Hermes gateway
+## Official compatibility pin
 
-Use the additive compatibility package at [`gateway/README.md`](./gateway/README.md). It:
-
-- probes official Hermes `v0.20.1` capabilities without importing this repository's runtime;
-- stores every managed resource under `~/.hermes/mobile-gateway`;
-- generates owner-only `0600` token and pairing manifests;
-- launches the installed `hermes serve` on `127.0.0.1` only;
-- requires HTTPS/WSS ingress for both public and private mobile connections;
-- never upgrades or edits the official package, `.env`, config, profiles, or state database;
-- checks the current `HOME`/`HERMES_HOME` for an existing Hermes gateway before installing;
-- refuses to stop, restart, or replace an existing Hermes process/service.
-
-After TLS ingress is ready, import the endpoint and secret from the `0600` pairing manifest into the app over a trusted encrypted channel. Never paste the secret into shell arguments or send it over plaintext HTTP/WS.
+The official compatibility workflow checks out and verifies tag
+`v2026.8.13`, peeled commit
+`f80f453ae0679347e38abc917c7f94f717bf96c5`, and runtime version `v0.20.1` in a
+distinct checkout. It also asserts that imported `hermes_cli` resolves below
+that checkout and that the integration lifecycle test is actually collected
+with the `integration` marker.

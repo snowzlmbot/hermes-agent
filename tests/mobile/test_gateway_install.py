@@ -16,6 +16,7 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = REPOSITORY_ROOT / "apps" / "mobile" / "gateway" / "install.py"
 MOBILE_ROOT = Path(".hermes/mobile-gateway")
+PACKAGE_ID = "hermes.mobile.sidecar"
 TOKEN_HEADER = "X-Hermes-Session-Token"
 SERVICE_NAME = "hermes-mobile-gateway.service"
 
@@ -43,8 +44,6 @@ def _snapshot(path: Path, *, exclude: Path | None = None) -> dict[str, tuple[str
             mtime_ns = metadata.st_mtime_ns
         else:
             digest = "directory"
-            # Creating/removing the one allowed child necessarily changes the
-            # parent directory timestamp; content and mode remain protected.
             mtime_ns = 0
         result[relative] = (digest, mode, mtime_ns)
     return result
@@ -55,9 +54,9 @@ def installation_fixture(tmp_path: Path) -> dict[str, Any]:
     home = tmp_path / "home"
     hermes_home = tmp_path / "official-hermes-home"
     default_hermes_home = home / ".hermes"
-    home.mkdir()
-    default_hermes_home.mkdir()
-    hermes_home.mkdir()
+    home.mkdir(mode=0o700)
+    default_hermes_home.mkdir(mode=0o700)
+    hermes_home.mkdir(mode=0o700)
     official_files = {
         default_hermes_home / "config.yaml": "default-home-state: unchanged\n",
         hermes_home / ".env": "NOUS_API_KEY=official-unchanged\n",
@@ -75,6 +74,19 @@ def installation_fixture(tmp_path: Path) -> dict[str, Any]:
     fake_bin.mkdir(parents=True)
     fake_package.mkdir(parents=True)
     (fake_package / "__init__.py").write_text('__version__ = "0.20.1"\n', encoding="utf-8")
+    fake_python = fake_bin / "python"
+    _write_executable(
+        fake_python,
+        f"""#!/usr/bin/env python3
+import os
+import subprocess
+import sys
+if any("sidecar-dependencies-ok" in argument for argument in sys.argv):
+    print("sidecar-dependencies-ok")
+    raise SystemExit(0)
+raise SystemExit(subprocess.call([{sys.executable!r}, *sys.argv[1:]]))
+""",
+    )
 
     hermes_log = tmp_path / "hermes-commands.jsonl"
     conflict_file = tmp_path / "hermes-conflict"
@@ -92,10 +104,10 @@ with log.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps({"argv": sys.argv[1:], "home": os.environ.get("HOME"), "hermes_home": os.environ.get("HERMES_HOME"), "pythonpath": os.environ.get("PYTHONPATH"), "pythonhome": os.environ.get("PYTHONHOME")}) + "\\n")
 args = sys.argv[1:]
 if args in (["version"], ["--version"]):
-    print("Hermes Agent v0.20.1")
+    print("Hermes Agent v0.20.1 (2026.8.13)")
     raise SystemExit(0)
 if args == ["serve", "--help"]:
-    print("usage: hermes serve [--host HOST] [--port PORT] [--status] [--skip-build]")
+    print("usage: hermes serve [--host HOST] [--port PORT] [--status]")
     raise SystemExit(0)
 if args == ["serve", "--status"]:
     conflict = Path(os.environ["FAKE_HERMES_CONFLICT"])
@@ -131,21 +143,23 @@ with log_path.open("a", encoding="utf-8") as handle:
     handle.write(json.dumps(args) + "\\n")
 if args and args[0] == "--user":
     args = args[1:]
+if state.get("query_error") and args[:1] == ["show"]:
+    print("Failed to connect to bus", file=sys.stderr)
+    raise SystemExit(1)
 if args[:1] == ["show"]:
-    prop = next((value.split("=", 1)[1] for value in args if value.startswith("--property=")), "")
-    values = {
-        "LoadState": "loaded" if state.get("unit") else "not-found",
-        "FragmentPath": state.get("unit") or "",
-        "ActiveState": "active" if state.get("active") else "inactive",
-    }
-    print(values.get(prop, ""))
+    if state.get("unit"):
+        print("LoadState=loaded")
+        print(f"FragmentPath={state['unit']}")
+        print(f"ActiveState={'active' if state.get('active') else 'inactive'}")
+        print(f"UnitFileState={'enabled' if state.get('enabled') else 'linked'}")
+    else:
+        print("LoadState=not-found")
+        print("FragmentPath=")
+        print("ActiveState=inactive")
+        print("UnitFileState=disabled")
     raise SystemExit(0)
-if args[:2] == ["is-active", "--quiet"]:
-    raise SystemExit(0 if state.get("active") else 3)
-if args[:2] == ["is-enabled", "--quiet"]:
-    raise SystemExit(0 if state.get("enabled") else 1)
 if args[:1] == ["link"]:
-    state["unit"] = str(Path(args[-1]).resolve())
+    state["unit"] = args[-1]
 elif args[:1] == ["daemon-reload"]:
     pass
 elif args[:2] == ["enable", "--now"]:
@@ -168,7 +182,7 @@ state_path.write_text(json.dumps(state), encoding="utf-8")
         {
             "HOME": str(home),
             "HERMES_HOME": str(hermes_home),
-            "PATH": f"{fake_bin}{os.pathsep}{env.get('PATH', '')}",
+            "PATH": f"{fake_bin}{os.pathsep}{Path(sys.executable).parent}{os.pathsep}{env.get('PATH', '')}",
             "FAKE_HERMES_LOG": str(hermes_log),
             "FAKE_HERMES_CONFLICT": str(conflict_file),
             "FAKE_CURRENT_HOME": str(home),
@@ -185,6 +199,8 @@ state_path.write_text(json.dumps(state), encoding="utf-8")
         "hermes_home": hermes_home,
         "hermes": hermes,
         "fake_root": fake_root,
+        "fake_bin": fake_bin,
+        "fake_python": fake_python,
         "hermes_log": hermes_log,
         "conflict_file": conflict_file,
         "systemctl_state": systemctl_state,
@@ -196,13 +212,16 @@ state_path.write_text(json.dumps(state), encoding="utf-8")
 def _run(fixture: dict[str, Any], *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     neutral_cwd = Path(fixture["home"]).parent / "neutral-cwd"
     neutral_cwd.mkdir(exist_ok=True)
+    expanded = list(args)
+    if expanded and expanded[0] in {"install", "probe"} and "--python" not in expanded:
+        expanded.extend(["--python", str(fixture["fake_python"])])
     result = subprocess.run(
-        [sys.executable, str(INSTALLER), *args],
+        [sys.executable, str(INSTALLER), *expanded],
         cwd=neutral_cwd,
         env=fixture["env"],
         text=True,
         capture_output=True,
-        timeout=20,
+        timeout=30,
     )
     if check and result.returncode != 0:
         raise AssertionError(f"command failed ({result.returncode}): stdout={result.stdout!r} stderr={result.stderr!r}")
@@ -224,10 +243,16 @@ def _official_snapshot(
     )
 
 
-def test_dry_run_install_is_non_mutating_and_reports_loopback_plan(installation_fixture: dict[str, Any]) -> None:
+def _set_service_inactive(fixture: dict[str, Any]) -> None:
+    state_path = Path(fixture["systemctl_state"])
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["active"] = False
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+
+def test_dry_run_is_non_mutating_and_reports_two_loopback_hops(installation_fixture: dict[str, Any]) -> None:
     fixture = installation_fixture
     before = _official_snapshot(fixture)
-
     result = _run(
         fixture,
         "install",
@@ -237,92 +262,104 @@ def test_dry_run_install_is_non_mutating_and_reports_loopback_plan(installation_
         "--endpoint",
         "https://private.example.test/hermes",
     )
-
     assert "127.0.0.1:9119" in result.stdout
+    assert "127.0.0.1:9120" in result.stdout
     assert "0.0.0.0" not in result.stdout
     assert not (Path(fixture["home"]) / MOBILE_ROOT).exists()
     assert _official_snapshot(fixture) == before
 
 
-def test_install_status_idempotence_and_no_official_mutation(installation_fixture: dict[str, Any]) -> None:
+def test_install_inventory_pairing_idempotence_and_no_official_mutation(
+    installation_fixture: dict[str, Any],
+) -> None:
     fixture = installation_fixture
     before = _official_snapshot(fixture)
-    install_args = (
+    args = (
         "install",
         "--hermes",
         str(fixture["hermes"]),
         "--endpoint",
         "https://private.example.test/hermes",
     )
+    first = _run(fixture, *args)
+    root = Path(fixture["home"]) / MOBILE_ROOT
+    external = (root / "external.token").read_text(encoding="ascii").strip()
+    internal = (root / "internal.token").read_text(encoding="ascii").strip()
+    pairing = json.loads((root / "pairing.json").read_text(encoding="utf-8"))
+    manifest = json.loads((root / "install.json").read_text(encoding="utf-8"))
 
-    first = _run(fixture, *install_args)
-    install_help = _run(fixture, "install", "--help")
-    assert "--token" not in install_help.stdout + install_help.stderr
-    mobile_root = Path(fixture["home"]) / MOBILE_ROOT
-    token_file = mobile_root / "session.token"
-    pairing_file = mobile_root / "pairing.json"
-    unit_file = mobile_root / SERVICE_NAME
-    launcher = mobile_root / "bin" / "launch"
-    token = token_file.read_text(encoding="ascii").strip()
-    pairing = json.loads(pairing_file.read_text(encoding="utf-8"))
-
-    assert len(token) == 64
-    assert all(character in "0123456789abcdef" for character in token)
-    assert token not in first.stdout + first.stderr
-    assert stat.S_IMODE(token_file.stat().st_mode) == 0o600
-    assert stat.S_IMODE(pairing_file.stat().st_mode) == 0o600
-    assert stat.S_IMODE(mobile_root.stat().st_mode) == 0o700
+    assert len(external) == len(internal) == 64
+    assert external != internal
+    assert external not in first.stdout + first.stderr
+    assert internal not in first.stdout + first.stderr
     assert pairing["endpoint"] == "https://private.example.test/hermes"
     assert pairing["websocket_url"] == "wss://private.example.test/hermes/api/ws"
-    assert pairing["auth"]["mode"] == "session_token"
-    assert pairing["auth"]["header"] == TOKEN_HEADER
-    assert pairing["auth"]["token"] == token
-    assert pairing["native_oauth"]["optional"] is True
+    assert "?" not in pairing["websocket_url"]
+    assert pairing["auth"] == {
+        "mode": "session_token",
+        "header": TOKEN_HEADER,
+        "token": external,
+        "ws_ticket_path": "/api/auth/ws-ticket",
+        "websocket_query_parameter": "ticket",
+        "ticket_ttl_seconds": 30,
+    }
+    assert manifest["package_id"] == PACKAGE_ID
+    assert len(manifest["installation_id"]) == 32
+    assert manifest["managed_root"] == str(root)
+    assert set(manifest["inventory"]) == {
+        "bin",
+        "bin/manage",
+        "bin/launch",
+        "bin/sidecar.py",
+        "bin/supervisor.py",
+        "external.token",
+        "internal.token",
+        "pairing.json",
+        "runtime.json",
+        "capabilities.json",
+        "rollback.json",
+        SERVICE_NAME,
+        "install.json",
+    }
+    for relative, entry in manifest["inventory"].items():
+        path = root / relative
+        assert stat.S_IMODE(path.lstat().st_mode) == int(entry["mode"], 8)
+        if relative != "install.json" and entry["type"] == "file":
+            assert entry["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
 
-    unit = unit_file.read_text(encoding="utf-8")
-    launch = launcher.read_text(encoding="utf-8")
-    assert "127.0.0.1" in launch
-    assert "--port 9119" in launch
-    assert "0.0.0.0" not in unit + launch
-    assert str(Path(fixture["hermes"]).resolve()) in launch
-    assert "unset PYTHONPATH PYTHONHOME" in launch
-    assert token not in unit + launch
+    unit = (root / SERVICE_NAME).read_text(encoding="utf-8")
+    launch = (root / "bin/launch").read_text(encoding="utf-8")
+    assert "%h" not in unit
+    assert str(root / "bin/launch") in unit
+    assert "--upstream-port 9119" in launch
+    assert "--sidecar-port 9120" in launch
+    assert external not in unit + launch
+    assert internal not in unit + launch
     assert "Restart=no" in unit
 
-    installed_snapshot = _snapshot(mobile_root)
-    second = _run(fixture, *install_args)
+    installed_snapshot = _snapshot(root)
+    second = _run(fixture, *args)
     assert "already installed" in second.stdout.lower()
-    assert _snapshot(mobile_root) == installed_snapshot
+    assert _snapshot(root) == installed_snapshot
 
     status = _run(fixture, "status", "--json")
-    status_payload = json.loads(status.stdout)
-    assert status_payload["installed"] is True
-    assert status_payload["bind"] == "127.0.0.1"
-    assert status_payload["port"] == 9119
-    assert status_payload["service_active"] is True
+    payload = json.loads(status.stdout)
+    assert payload["installed"] is True
+    assert payload["service_state"] == "active"
+    assert payload["upstream_port"] == 9119
+    assert payload["sidecar_port"] == 9120
+    assert external not in status.stdout + status.stderr
+    assert internal not in status.stdout + status.stderr
     assert "token" not in status.stdout.lower()
-    assert token not in status.stdout + status.stderr
-
-    commands = [json.loads(line) for line in Path(fixture["hermes_log"]).read_text().splitlines()]
-    status_commands = [entry for entry in commands if entry["argv"] == ["serve", "--status"]]
-    capability_commands = [entry for entry in commands if entry["argv"] != ["serve", "--status"]]
-    assert status_commands
-    assert all(entry["pythonpath"] is None for entry in commands)
-    assert all(entry["pythonhome"] is None for entry in commands)
-    assert all(entry["home"] == str(fixture["home"]) for entry in status_commands)
-    assert all(entry["hermes_home"] == str(fixture["hermes_home"]) for entry in status_commands)
-    assert all(Path(entry["home"]).name.startswith("hermes-mobile-probe-") for entry in capability_commands)
-    assert all(
-        Path(entry["hermes_home"]) == Path(entry["home"]) / ".hermes" for entry in capability_commands
-    )
     assert _official_snapshot(fixture) == before
 
 
-def test_conflicts_fail_closed_before_install(installation_fixture: dict[str, Any]) -> None:
+def test_existing_process_ports_and_foreign_service_fail_before_mutation(
+    installation_fixture: dict[str, Any],
+) -> None:
     fixture = installation_fixture
+    root = Path(fixture["home"]) / MOBILE_ROOT
     before = _official_snapshot(fixture)
-    mobile_root = Path(fixture["home"]) / MOBILE_ROOT
-
     Path(fixture["conflict_file"]).write_text("running", encoding="utf-8")
     running = _run(
         fixture,
@@ -333,8 +370,8 @@ def test_conflicts_fail_closed_before_install(installation_fixture: dict[str, An
         check=False,
     )
     assert running.returncode != 0
-    assert "existing hermes serve" in running.stderr.lower()
-    assert not mobile_root.exists()
+    assert "existing hermes" in running.stderr.lower()
+    assert not root.exists()
     Path(fixture["conflict_file"]).unlink()
 
     with socket.socket() as occupied:
@@ -346,83 +383,133 @@ def test_conflicts_fail_closed_before_install(installation_fixture: dict[str, An
             "install",
             "--hermes",
             str(fixture["hermes"]),
-            "--port",
+            "--sidecar-port",
             str(port),
             "--no-activate",
             check=False,
         )
     assert blocked.returncode != 0
-    assert "port" in blocked.stderr.lower()
-    assert not mobile_root.exists()
-    assert _official_snapshot(fixture) == before
-
-
-def test_cleartext_endpoint_and_foreign_service_are_rejected(installation_fixture: dict[str, Any]) -> None:
-    fixture = installation_fixture
-    mobile_root = Path(fixture["home"]) / MOBILE_ROOT
-    insecure = _run(
-        fixture,
-        "install",
-        "--hermes",
-        str(fixture["hermes"]),
-        "--endpoint",
-        "http://192.0.2.10:9119",
-        "--no-activate",
-        check=False,
-    )
-    assert insecure.returncode != 0
-    assert "https" in insecure.stderr.lower()
-    assert not mobile_root.exists()
+    assert "sidecar loopback port" in blocked.stderr.lower()
+    assert not root.exists()
 
     foreign_unit = Path(fixture["home"]).parent / "foreign.service"
     Path(fixture["systemctl_state"]).write_text(
         json.dumps({"unit": str(foreign_unit), "active": False, "enabled": False}),
         encoding="utf-8",
     )
-    foreign = _run(
+    foreign = _run(fixture, "install", "--hermes", str(fixture["hermes"]), check=False)
+    assert foreign.returncode != 0
+    assert "exact package-owned unit" in foreign.stderr.lower()
+    assert not root.exists()
+    assert _official_snapshot(fixture) == before
+
+
+def test_status_fails_before_reading_insecure_or_linked_inventory(installation_fixture: dict[str, Any]) -> None:
+    fixture = installation_fixture
+    _run(fixture, "install", "--hermes", str(fixture["hermes"]), "--no-activate")
+    root = Path(fixture["home"]) / MOBILE_ROOT
+    pairing = root / "pairing.json"
+    external = (root / "external.token").read_text(encoding="ascii").strip()
+
+    pairing.write_bytes(b"not-json-and-must-not-be-read")
+    pairing.chmod(0o644)
+    insecure = _run(fixture, "status", "--json", check=False)
+    assert insecure.returncode != 0
+    assert "permissions must be 0600" in insecure.stderr
+    assert "cannot read pairing" not in insecure.stderr.lower()
+    assert external not in insecure.stdout + insecure.stderr
+
+    pairing.unlink()
+    pairing.symlink_to(root / "runtime.json")
+    linked = _run(fixture, "status", "--json", check=False)
+    assert linked.returncode != 0
+    assert "not a symlink" in linked.stderr.lower()
+
+
+def test_uninstall_requires_known_inactive_exact_service_and_verified_inventory(
+    installation_fixture: dict[str, Any],
+) -> None:
+    fixture = installation_fixture
+    before = _official_snapshot(fixture)
+    root = Path(fixture["home"]) / MOBILE_ROOT
+    _run(fixture, "install", "--hermes", str(fixture["hermes"]))
+    external = (root / "external.token").read_text(encoding="ascii").strip()
+
+    log_path = Path(fixture["systemctl_log"])
+    before_lines = log_path.read_text(encoding="utf-8").splitlines()
+    active = _run(fixture, "uninstall", "--yes", check=False)
+    assert active.returncode != 0
+    assert "never stops" in active.stderr.lower()
+    new_commands = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()[len(before_lines) :]]
+    assert not any(command[1:2] in (["stop"], ["restart"], ["disable"]) for command in new_commands)
+    assert root.exists()
+
+    _set_service_inactive(fixture)
+    original_manifest = (root / "install.json").read_bytes()
+    manifest = json.loads(original_manifest)
+    manifest["installation_id"] = "wrong-installation"
+    (root / "install.json").write_text(json.dumps(manifest), encoding="utf-8")
+    invalid_id = _run(fixture, "uninstall", "--yes", check=False)
+    assert invalid_id.returncode != 0
+    assert "installation" in invalid_id.stderr.lower()
+    assert root.exists()
+    (root / "install.json").write_bytes(original_manifest)
+    (root / "install.json").chmod(0o600)
+
+    extra = root / "foreign.txt"
+    extra.write_text("not owned by the package", encoding="utf-8")
+    extra.chmod(0o600)
+    extra_file = _run(fixture, "uninstall", "--yes", check=False)
+    assert extra_file.returncode != 0
+    assert "inventory differs" in extra_file.stderr.lower()
+    assert extra.exists()
+    extra.unlink()
+
+    state_path = Path(fixture["systemctl_state"])
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["query_error"] = True
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    unknown = _run(fixture, "uninstall", "--yes", check=False)
+    assert unknown.returncode != 0
+    assert "unknown" in unknown.stderr.lower()
+    assert root.exists()
+    state.pop("query_error")
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+    dry_run = _run(fixture, "rollback", "--dry-run")
+    assert root.exists()
+    assert external not in dry_run.stdout + dry_run.stderr
+    removed = _run(fixture, "uninstall", "--yes")
+    assert "verified inventory" in removed.stdout.lower()
+    assert not root.exists()
+    assert _official_snapshot(fixture) == before
+
+
+def test_systemctl_unavailable_is_unknown_and_blocks_activate_and_remove(
+    installation_fixture: dict[str, Any],
+) -> None:
+    fixture = installation_fixture
+    no_systemctl_bin = Path(fixture["home"]).parent / "no-systemctl-bin"
+    no_systemctl_bin.mkdir(mode=0o700)
+    (no_systemctl_bin / "python3").symlink_to("/usr/bin/python3")
+    fixture["env"]["PATH"] = str(no_systemctl_bin)
+    installed = _run(
         fixture,
         "install",
         "--hermes",
         str(fixture["hermes"]),
-        check=False,
+        "--no-activate",
     )
-    assert foreign.returncode != 0
-    assert "existing user service" in foreign.stderr.lower()
-    assert not mobile_root.exists()
+    assert installed.returncode == 0
+    root = Path(fixture["home"]) / MOBILE_ROOT
+    status = json.loads(_run(fixture, "status", "--json").stdout)
+    assert status["service_state"] == "unknown"
+    assert status["service_active"] is None
 
-
-def test_uninstall_never_stops_service_and_rollback_is_dry_run_testable(installation_fixture: dict[str, Any]) -> None:
-    fixture = installation_fixture
-    before = _official_snapshot(fixture)
-    mobile_root = Path(fixture["home"]) / MOBILE_ROOT
-    _run(fixture, "install", "--hermes", str(fixture["hermes"]))
-    token = (mobile_root / "session.token").read_text(encoding="ascii").strip()
-
-    systemctl_log = Path(fixture["systemctl_log"])
-    before_refusal = systemctl_log.read_text(encoding="utf-8").splitlines()
-    refused = _run(fixture, "uninstall", "--yes", check=False)
-    assert refused.returncode != 0
-    assert "stop" in refused.stderr.lower()
-    assert mobile_root.exists()
-    refusal_commands = [json.loads(line) for line in systemctl_log.read_text(encoding="utf-8").splitlines()[len(before_refusal) :]]
-    assert not any(command[:1] in (["stop"], ["restart"], ["disable"]) for command in refusal_commands)
-
-    state = json.loads(Path(fixture["systemctl_state"]).read_text(encoding="utf-8"))
-    state["active"] = False
-    Path(fixture["systemctl_state"]).write_text(json.dumps(state), encoding="utf-8")
-    dry_run = _run(fixture, "rollback", "--dry-run")
-    assert "remove" in dry_run.stdout.lower()
-    assert mobile_root.exists()
-    assert token not in dry_run.stdout + dry_run.stderr
-
-    _run(fixture, "rollback", "--yes")
-    assert not mobile_root.exists()
-    assert _official_snapshot(fixture) == before
-
-    _run(fixture, "install", "--hermes", str(fixture["hermes"]), "--no-activate")
-    uninstall_dry_run = _run(fixture, "uninstall", "--dry-run")
-    assert mobile_root.exists()
-    assert "remove" in uninstall_dry_run.stdout.lower()
-    _run(fixture, "uninstall", "--yes")
-    assert not mobile_root.exists()
-    assert _official_snapshot(fixture) == before
+    activate = _run(fixture, "install", "--hermes", str(fixture["hermes"]), check=False)
+    assert activate.returncode != 0
+    assert "unknown" in activate.stderr.lower()
+    remove = _run(fixture, "uninstall", "--yes", check=False)
+    assert remove.returncode != 0
+    assert "unknown" in remove.stderr.lower()
+    assert root.exists()

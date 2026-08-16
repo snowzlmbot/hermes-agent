@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Install an additive loopback gateway service for the Hermes mobile client.
+"""Install an independent credential-isolating mobile gateway sidecar.
 
-This manager never installs, upgrades, imports, or edits the official Hermes
-package.  Its managed files are confined to ~/.hermes/mobile-gateway.  The
-service executes the already-installed ``hermes serve`` command.
+The package never edits the official Hermes checkout, package, configuration,
+or state. It manages one user service below ~/.hermes/mobile-gateway. That
+service starts a pinned official ``hermes serve`` child on loopback and a
+separate Hermes Mobile sidecar on a second loopback port.
 """
 
 from __future__ import annotations
@@ -27,18 +28,54 @@ from typing import Any, NoReturn
 from urllib.parse import urlsplit, urlunsplit
 
 
-INSTALLER_VERSION = "1.0.0"
-MINIMUM_HERMES_VERSION = (0, 20, 1)
-DEFAULT_PORT = 9119
+INSTALLER_VERSION = "2.0.0"
+PACKAGE_ID = "hermes.mobile.sidecar"
+INSTALL_SCHEMA = "hermes.mobile-sidecar-install/v2"
+PAIRING_SCHEMA = "hermes.mobile-sidecar-pairing/v2"
+OFFICIAL_RELEASE_TAG = "v2026.8.13"
+OFFICIAL_COMMIT = "f80f453ae0679347e38abc917c7f94f717bf96c5"
+OFFICIAL_VERSION = (0, 20, 1)
+DEFAULT_UPSTREAM_PORT = 9119
+DEFAULT_SIDECAR_PORT = 9120
 BIND_HOST = "127.0.0.1"
 SERVICE_NAME = "hermes-mobile-gateway.service"
 TOKEN_HEADER = "X-Hermes-Session-Token"
-TOKEN_RE = re.compile(r"[0-9a-f]{64}")
-VERSION_RE = re.compile(r"(?<!\d)v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)")
+TICKET_TTL_SECONDS = 30
 NO_RUNNING_SERVER = "No hermes dashboard processes running."
 SECRET_MODE = 0o600
 EXECUTABLE_MODE = 0o700
 DIRECTORY_MODE = 0o700
+TOKEN_RE = re.compile(r"[0-9a-f]{64}")
+INSTALLATION_ID_RE = re.compile(r"[0-9a-f]{32}")
+VERSION_RE = re.compile(r"(?<!\d)v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)")
+
+_DIRECTORY_LAYOUT = {"bin": DIRECTORY_MODE}
+_FILE_LAYOUT = {
+    "bin/manage": EXECUTABLE_MODE,
+    "bin/launch": EXECUTABLE_MODE,
+    "bin/sidecar.py": EXECUTABLE_MODE,
+    "bin/supervisor.py": EXECUTABLE_MODE,
+    "external.token": SECRET_MODE,
+    "internal.token": SECRET_MODE,
+    "pairing.json": SECRET_MODE,
+    "runtime.json": SECRET_MODE,
+    "capabilities.json": SECRET_MODE,
+    "rollback.json": SECRET_MODE,
+    SERVICE_NAME: SECRET_MODE,
+    "install.json": SECRET_MODE,
+}
+_ROOT_CHILDREN = {
+    "bin",
+    "external.token",
+    "internal.token",
+    "pairing.json",
+    "runtime.json",
+    "capabilities.json",
+    "rollback.json",
+    SERVICE_NAME,
+    "install.json",
+}
+_BIN_CHILDREN = {"manage", "launch", "sidecar.py", "supervisor.py"}
 
 
 class InstallError(RuntimeError):
@@ -53,15 +90,47 @@ def _utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _mobile_root() -> Path:
-    home = os.environ.get("HOME", "").strip()
-    if not home:
+def _canonical_home() -> Path:
+    raw = os.environ.get("HOME", "").strip()
+    if not raw:
         _fail("HOME is not set; refusing to choose an installation directory")
-    return Path(home).expanduser() / ".hermes" / "mobile-gateway"
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        _fail("HOME must be an absolute canonical path")
+    try:
+        metadata = candidate.lstat()
+        resolved = candidate.resolve(strict=True)
+    except OSError as error:
+        _fail(f"HOME is unavailable: {error}")
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        _fail("HOME must be a real directory, not a symlink")
+    if resolved != candidate:
+        _fail("HOME must already be canonical; symlinked path components are not allowed")
+    if metadata.st_uid != os.getuid():
+        _fail("HOME is not owned by the current user")
+    if stat.S_IMODE(metadata.st_mode) & 0o022:
+        _fail("HOME must not be group/world writable")
+    return resolved
+
+
+def _mobile_root() -> Path:
+    return _canonical_home() / ".hermes" / "mobile-gateway"
 
 
 def _source_bytes() -> bytes:
     return Path(__file__).resolve().read_bytes()
+
+
+def _asset_bytes(name: str) -> bytes:
+    path = Path(__file__).resolve().parent / name
+    try:
+        return path.read_bytes()
+    except OSError as error:
+        _fail(f"required installer asset is unavailable ({name}): {error}")
+
+
+def _sha256_bytes(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
 
 
 def _sha256_file(path: Path) -> str:
@@ -72,56 +141,90 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _ensure_regular(path: Path, *, label: str) -> None:
+def _lstat(path: Path, *, label: str) -> os.stat_result:
     try:
-        metadata = path.lstat()
-    except FileNotFoundError:
-        return
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
-        _fail(f"{label} must be an owner-controlled regular file: {path}")
+        return path.lstat()
+    except OSError as error:
+        _fail(f"cannot inspect {label} at {path}: {error}")
+
+
+def _require_directory(path: Path, *, label: str, mode: int | None = None) -> None:
+    metadata = _lstat(path, label=label)
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        _fail(f"{label} must be a real directory, not a symlink: {path}")
     if metadata.st_uid != os.getuid():
         _fail(f"{label} is not owned by the current user: {path}")
+    if mode is not None and stat.S_IMODE(metadata.st_mode) != mode:
+        _fail(f"{label} permissions must be {mode:04o}: {path}")
 
 
-def _ensure_managed_root(root: Path, *, allow_absent: bool = True) -> None:
+def _require_file(path: Path, *, label: str, mode: int) -> None:
+    metadata = _lstat(path, label=label)
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        _fail(f"{label} must be a regular file, not a symlink: {path}")
+    if metadata.st_uid != os.getuid():
+        _fail(f"{label} is not owned by the current user: {path}")
+    if stat.S_IMODE(metadata.st_mode) != mode:
+        _fail(f"{label} permissions must be {mode:04o}: {path}")
+
+
+def _ensure_parent(root: Path, *, create: bool) -> None:
+    parent = root.parent
+    if parent.exists():
+        _require_directory(parent, label="Hermes home directory")
+        if stat.S_IMODE(parent.lstat().st_mode) & 0o022:
+            _fail(f"Hermes home directory must not be group/world writable: {parent}")
+        return
+    if not create:
+        return
+    parent.mkdir(mode=DIRECTORY_MODE, parents=False)
+    _require_directory(parent, label="Hermes home directory", mode=DIRECTORY_MODE)
+
+
+def _classify_root(root: Path) -> str:
+    _ensure_parent(root, create=False)
     try:
         metadata = root.lstat()
     except FileNotFoundError:
-        if allow_absent:
-            return
-        _fail(f"mobile gateway is not installed at {root}")
+        return "absent"
+    except OSError as error:
+        _fail(f"cannot inspect managed root: {error}")
     if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-        _fail(f"managed root must be an owner-controlled directory, not a link: {root}")
+        _fail(f"managed root must be a real directory, not a symlink: {root}")
     if metadata.st_uid != os.getuid():
         _fail(f"managed root is not owned by the current user: {root}")
-    manifest = root / "install.json"
-    if not manifest.exists() and any(root.iterdir()):
-        _fail(f"refusing to overwrite unmanaged content in {root}")
-    _ensure_regular(manifest, label="install manifest")
+    if stat.S_IMODE(metadata.st_mode) != DIRECTORY_MODE:
+        _fail(f"managed root permissions must be 0700: {root}")
+    children = {entry.name for entry in os.scandir(root)}
+    if not children:
+        return "empty"
+    if "install.json" not in children:
+        _fail(f"refusing to treat unmanaged content as this package: {root}")
+    return "installed"
 
 
-def _mkdir_managed(path: Path) -> None:
-    if path.exists():
-        metadata = path.lstat()
-        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-            _fail(f"managed directory path is not a directory: {path}")
-        if metadata.st_uid != os.getuid():
-            _fail(f"managed directory is not owned by the current user: {path}")
-        if stat.S_IMODE(metadata.st_mode) != DIRECTORY_MODE:
-            path.chmod(DIRECTORY_MODE)
-        return
+def _mkdir_exact(path: Path) -> None:
     path.mkdir(mode=DIRECTORY_MODE, parents=False)
+    _require_directory(path, label="managed directory", mode=DIRECTORY_MODE)
 
 
 def _atomic_write(path: Path, content: bytes, mode: int) -> bool:
-    _ensure_regular(path, label="managed file")
-    if path.exists():
-        current_mode = stat.S_IMODE(path.stat().st_mode)
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        metadata = None
+    except OSError as error:
+        _fail(f"cannot inspect managed file {path}: {error}")
+    if metadata is not None:
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            _fail(f"managed file must be a regular file, not a symlink: {path}")
+        if metadata.st_uid != os.getuid():
+            _fail(f"managed file is not owned by the current user: {path}")
+        if stat.S_IMODE(metadata.st_mode) != mode:
+            _fail(f"managed file permissions must be {mode:04o}: {path}")
         if path.read_bytes() == content:
-            if current_mode != mode:
-                path.chmod(mode)
-                return True
             return False
+
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary_path = Path(temporary)
     try:
@@ -131,7 +234,6 @@ def _atomic_write(path: Path, content: bytes, mode: int) -> bool:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_path, path)
-        path.chmod(mode)
         directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
         try:
             os.fsync(directory_fd)
@@ -142,16 +244,18 @@ def _atomic_write(path: Path, content: bytes, mode: int) -> bool:
             temporary_path.unlink()
         except FileNotFoundError:
             pass
+    _require_file(path, label="managed file", mode=mode)
     return True
 
 
-def _write_json(path: Path, payload: dict[str, Any], mode: int = SECRET_MODE) -> bool:
+def _write_json(path: Path, payload: dict[str, Any]) -> bool:
     content = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
-    return _atomic_write(path, content, mode)
+    return _atomic_write(path, content, SECRET_MODE)
 
 
-def _read_json(path: Path, *, label: str) -> dict[str, Any]:
-    _ensure_regular(path, label=label)
+def _read_json_verified(path: Path, *, label: str) -> dict[str, Any]:
+    # The caller verifies type, owner, and mode before this function. This
+    # ordering prevents read-only status from reading an insecure secret file.
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -161,31 +265,131 @@ def _read_json(path: Path, *, label: str) -> dict[str, Any]:
     return value
 
 
+def _layout_metadata(root: Path) -> None:
+    _require_directory(root, label="managed root", mode=DIRECTORY_MODE)
+    actual_root = {entry.name for entry in os.scandir(root)}
+    if actual_root != _ROOT_CHILDREN:
+        _fail(f"managed root inventory differs from {PACKAGE_ID}; refusing to continue")
+    bin_dir = root / "bin"
+    _require_directory(bin_dir, label="managed bin directory", mode=DIRECTORY_MODE)
+    actual_bin = {entry.name for entry in os.scandir(bin_dir)}
+    if actual_bin != _BIN_CHILDREN:
+        _fail(f"managed bin inventory differs from {PACKAGE_ID}; refusing to continue")
+    for relative, mode in _FILE_LAYOUT.items():
+        _require_file(root / relative, label=f"managed inventory entry {relative}", mode=mode)
+
+
+def _inventory_for(root: Path) -> dict[str, dict[str, Any]]:
+    inventory: dict[str, dict[str, Any]] = {
+        relative: {"type": "directory", "mode": f"{mode:04o}"}
+        for relative, mode in _DIRECTORY_LAYOUT.items()
+    }
+    for relative, mode in _FILE_LAYOUT.items():
+        entry: dict[str, Any] = {"type": "file", "mode": f"{mode:04o}"}
+        if relative != "install.json":
+            entry["sha256"] = _sha256_file(root / relative)
+        inventory[relative] = entry
+    return inventory
+
+
+def _write_install_manifest(root: Path, *, installation_id: str, installed_at: str) -> None:
+    manifest = {
+        "schema": INSTALL_SCHEMA,
+        "schema_version": 2,
+        "package_id": PACKAGE_ID,
+        "installation_id": installation_id,
+        "managed_root": str(root),
+        "installed_at": installed_at,
+        "installer_version": INSTALLER_VERSION,
+        "inventory": _inventory_for(root),
+        "official_files_modified": [],
+    }
+    _write_json(root / "install.json", manifest)
+
+
+def _validate_installation(root: Path) -> dict[str, Any]:
+    _layout_metadata(root)
+    manifest = _read_json_verified(root / "install.json", label="install manifest")
+    installation_id = manifest.get("installation_id")
+    if (
+        manifest.get("schema") != INSTALL_SCHEMA
+        or manifest.get("schema_version") != 2
+        or manifest.get("package_id") != PACKAGE_ID
+        or not isinstance(installation_id, str)
+        or INSTALLATION_ID_RE.fullmatch(installation_id) is None
+    ):
+        _fail("install manifest does not identify a valid Hermes Mobile sidecar installation")
+    if manifest.get("managed_root") != str(root) or Path(str(manifest.get("managed_root"))) != root:
+        _fail("install manifest managed_root does not match the canonical package root")
+    inventory = manifest.get("inventory")
+    if not isinstance(inventory, dict) or set(inventory) != set(_DIRECTORY_LAYOUT) | set(_FILE_LAYOUT):
+        _fail("install manifest inventory is incomplete or contains unowned paths")
+    actual = _inventory_for(root)
+    if inventory != actual:
+        _fail("managed inventory digest, type, or mode mismatch; refusing to continue")
+    return manifest
+
+
+def _read_token_verified(path: Path, *, label: str) -> str:
+    try:
+        token = path.read_text(encoding="ascii").strip()
+    except OSError as error:
+        _fail(f"cannot read {label}: {error}")
+    if TOKEN_RE.fullmatch(token) is None:
+        _fail(f"{label} is invalid")
+    return token
+
+
 def _resolve_command(value: str | None) -> Path:
-    if value:
-        candidate = Path(value).expanduser()
-        if not candidate.is_absolute() and os.sep not in value:
-            located = shutil.which(value)
-            if located is None:
-                _fail(f"Hermes command is not on PATH: {value}")
-            candidate = Path(located)
-    else:
-        located = shutil.which("hermes")
+    selected = value or "hermes"
+    candidate = Path(selected).expanduser()
+    if not candidate.is_absolute() and os.sep not in selected:
+        located = shutil.which(selected)
         if located is None:
-            _fail("official Hermes command not found on PATH; pass --hermes /absolute/path/to/hermes")
+            _fail(f"official Hermes command is not on PATH: {selected}")
         candidate = Path(located)
     try:
         resolved = candidate.resolve(strict=True)
     except OSError as error:
-        _fail(f"cannot resolve Hermes command {candidate}: {error}")
+        _fail(f"cannot resolve official Hermes command {candidate}: {error}")
     if not resolved.is_file() or not os.access(resolved, os.X_OK):
-        _fail(f"Hermes command is not an executable file: {resolved}")
+        _fail(f"official Hermes command is not executable: {resolved}")
     return resolved
 
 
-def _sanitized_hermes_environment() -> dict[str, str]:
-    env = os.environ.copy()
-    env.update(
+def _python_from_shebang(command: Path) -> Path | None:
+    try:
+        first_line = command.open("rb").readline(4096).decode("utf-8", "strict").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not first_line.startswith("#!"):
+        return None
+    words = shlex.split(first_line[2:])
+    if len(words) != 1 or not Path(words[0]).is_absolute():
+        return None
+    return Path(words[0])
+
+
+def _resolve_python(value: str | None, hermes: Path) -> Path:
+    candidate = Path(value).expanduser() if value else _python_from_shebang(hermes)
+    if candidate is None:
+        _fail("cannot identify the official Hermes Python; pass --python /absolute/path/to/its/python")
+    if not candidate.is_absolute():
+        _fail("official Hermes Python must be an absolute path")
+    try:
+        resolved_target = candidate.resolve(strict=True)
+    except OSError as error:
+        _fail(f"cannot resolve official Hermes Python {candidate}: {error}")
+    if not resolved_target.is_file() or not os.access(candidate, os.X_OK):
+        _fail(f"official Hermes Python is not executable: {candidate}")
+    # Preserve the venv entry path. Resolving its normal python symlink to the
+    # base interpreter would discard pyvenv.cfg and lose official dependencies.
+    return candidate
+
+
+def _sanitized_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment.update(
         {
             "PYTHONDONTWRITEBYTECODE": "1",
             "OPENROUTER_API_KEY": "",
@@ -193,122 +397,129 @@ def _sanitized_hermes_environment() -> dict[str, str]:
             "NOUS_API_KEY": "",
         }
     )
-    env.pop("PYTHONPATH", None)
-    env.pop("PYTHONHOME", None)
-    return env
+    environment.pop("PYTHONPATH", None)
+    environment.pop("PYTHONHOME", None)
+    return environment
 
 
-def _probe_environment() -> tuple[tempfile.TemporaryDirectory[str], dict[str, str]]:
-    temporary = tempfile.TemporaryDirectory(prefix="hermes-mobile-probe-")
-    probe_home = Path(temporary.name)
-    env = _sanitized_hermes_environment()
-    env.update({"HOME": str(probe_home), "HERMES_HOME": str(probe_home / ".hermes")})
-    return temporary, env
+def _run_isolated(command: list[str], *, timeout: int = 20) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory(prefix="hermes-mobile-probe-") as directory:
+        home = Path(directory)
+        environment = _sanitized_environment()
+        environment.update({"HOME": str(home), "HERMES_HOME": str(home / ".hermes")})
+        try:
+            return subprocess.run(
+                command,
+                cwd=directory,
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            _fail(f"official Hermes capability probe failed: {error}")
 
 
-def _run_hermes(command: Path, arguments: list[str], *, timeout: int = 20) -> subprocess.CompletedProcess[str]:
-    temporary, env = _probe_environment()
-    try:
-        return subprocess.run(
-            [str(command), *arguments],
-            cwd=temporary.name,
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        _fail(f"Hermes capability probe timed out: {shlex.join([str(command), *arguments])}")
-    except OSError as error:
-        _fail(f"Hermes capability probe failed: {error}")
-    finally:
-        temporary.cleanup()
-
-
-def _run_hermes_current_home_status(command: Path) -> subprocess.CompletedProcess[str]:
-    env = _sanitized_hermes_environment()
-    with tempfile.TemporaryDirectory(prefix="hermes-mobile-status-cwd-") as neutral_cwd:
+def _run_current_home_status(command: Path) -> subprocess.CompletedProcess[str]:
+    environment = _sanitized_environment()
+    with tempfile.TemporaryDirectory(prefix="hermes-mobile-status-cwd-") as directory:
         try:
             return subprocess.run(
                 [str(command), "serve", "--status"],
-                cwd=neutral_cwd,
-                env=env,
+                cwd=directory,
+                env=environment,
                 text=True,
                 capture_output=True,
                 timeout=20,
             )
-        except subprocess.TimeoutExpired:
-            _fail("Hermes status probe timed out")
-        except OSError as error:
-            _fail(f"Hermes status probe failed: {error}")
+        except (OSError, subprocess.TimeoutExpired) as error:
+            _fail(f"official Hermes status probe failed: {error}")
 
 
 def _parse_version(output: str) -> tuple[str, tuple[int, int, int]]:
     match = VERSION_RE.search(output)
     if match is None:
-        _fail(f"could not parse Hermes version from probe output: {output.strip()!r}")
+        _fail(f"could not parse official Hermes version from: {output.strip()!r}")
     version = match.group(1)
     numeric = version.split("-", 1)[0].split("+", 1)[0]
-    major, minor, patch = (int(part) for part in numeric.split(".")[:3])
-    return version, (major, minor, patch)
+    return version, tuple(int(part) for part in numeric.split(".")[:3])  # type: ignore[return-value]
 
 
-def _probe_hermes(value: str | None) -> dict[str, Any]:
-    command = _resolve_command(value)
-    version_result = _run_hermes(command, ["version"])
+def _probe_hermes(command_value: str | None, python_value: str | None) -> dict[str, Any]:
+    command = _resolve_command(command_value)
+    python = _resolve_python(python_value, command)
+    version_result = _run_isolated([str(command), "version"])
     if version_result.returncode != 0:
-        version_result = _run_hermes(command, ["--version"])
+        version_result = _run_isolated([str(command), "--version"])
     if version_result.returncode != 0:
-        _fail(
-            "official Hermes version probe failed: "
-            + (version_result.stderr.strip() or version_result.stdout.strip() or f"exit {version_result.returncode}")
-        )
-    version, numeric_version = _parse_version(version_result.stdout + "\n" + version_result.stderr)
-    if numeric_version < MINIMUM_HERMES_VERSION:
-        minimum = ".".join(str(part) for part in MINIMUM_HERMES_VERSION)
-        _fail(f"Hermes {version} is too old for secure token pairing; require {minimum} or newer")
+        _fail("official Hermes version probe failed")
+    version, numeric = _parse_version(version_result.stdout + "\n" + version_result.stderr)
+    if numeric != OFFICIAL_VERSION:
+        expected = ".".join(str(part) for part in OFFICIAL_VERSION)
+        _fail(f"this compatibility package is pinned to official Hermes {expected}; found {version}")
 
-    help_result = _run_hermes(command, ["serve", "--help"])
+    help_result = _run_isolated([str(command), "serve", "--help"])
     if help_result.returncode != 0:
-        _fail("installed Hermes does not provide a usable 'hermes serve' command")
+        _fail("installed official Hermes does not provide a usable 'hermes serve' command")
     help_text = help_result.stdout + "\n" + help_result.stderr
     required_flags = ("--host", "--port", "--status")
     missing = [flag for flag in required_flags if flag not in help_text]
     if missing:
-        _fail(f"installed Hermes serve is missing required capabilities: {', '.join(missing)}")
+        _fail(f"official Hermes serve is missing required flags: {', '.join(missing)}")
+
+    dependency_probe = _run_isolated(
+        [
+            str(python),
+            "-I",
+            "-c",
+            "import fastapi,httpx,uvicorn,websockets; print('sidecar-dependencies-ok')",
+        ]
+    )
+    if dependency_probe.returncode != 0 or dependency_probe.stdout.strip() != "sidecar-dependencies-ok":
+        _fail("official Hermes Python does not provide the sidecar's pinned runtime dependencies")
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "compatible": True,
-        "minimum_version": ".".join(str(part) for part in MINIMUM_HERMES_VERSION),
+        "official_release_tag": OFFICIAL_RELEASE_TAG,
+        "official_commit": OFFICIAL_COMMIT,
         "version": version,
         "command": str(command),
         "command_sha256": _sha256_file(command),
+        "python": str(python),
+        "python_sha256": _sha256_file(python),
         "serve_flags": list(required_flags),
-        "session_token_environment": "HERMES_DASHBOARD_SESSION_TOKEN",
         "bind": BIND_HOST,
-        "native_oauth_required": False,
     }
 
 
 def _assert_no_running_hermes(command: Path) -> None:
-    result = _run_hermes_current_home_status(command)
+    result = _run_current_home_status(command)
     if result.returncode != 0:
-        _fail("could not determine whether an existing Hermes serve process is running; refusing to continue")
+        _fail("could not determine whether an existing Hermes gateway is running; refusing to continue")
     if NO_RUNNING_SERVER not in result.stdout:
         _fail(
-            "existing Hermes serve/dashboard process detected; this installer never stops, restarts, or replaces it. "
-            "Choose a separate host/user or stop it explicitly before retrying."
+            "an existing Hermes serve/dashboard process is running; this package never stops, restarts, "
+            "or replaces it"
         )
 
 
-def _assert_port_available(port: int) -> None:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
+def _assert_port_available(port: int, *, label: str) -> None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             listener.bind((BIND_HOST, port))
-        except OSError as error:
-            _fail(f"loopback port {port} is unavailable ({error}); no service was created or started")
+    except OSError as error:
+        _fail(f"{label} loopback port {port} cannot be verified ({error})")
+
+
+def _port_listening(port: int) -> bool:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+            connection.settimeout(0.25)
+            return connection.connect_ex((BIND_HOST, port)) == 0
+    except OSError as error:
+        _fail(f"cannot verify whether loopback port {port} is in use: {error}")
 
 
 def _systemctl() -> Path | None:
@@ -317,94 +528,118 @@ def _systemctl() -> Path | None:
 
 
 def _run_systemctl(systemctl: Path, *arguments: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    environment = os.environ.copy()
+    environment["LC_ALL"] = "C"
     try:
         result = subprocess.run(
             [str(systemctl), "--user", *arguments],
+            env=environment,
             text=True,
             capture_output=True,
             timeout=15,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        _fail(f"systemd user service query failed: {error}")
+        _fail(f"systemd user service operation failed: {error}")
     if check and result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
         _fail(f"systemd user service operation failed ({' '.join(arguments)}): {detail}")
     return result
 
 
+def _verified_not_found(result: subprocess.CompletedProcess[str]) -> bool:
+    if result.returncode == 0:
+        return False
+    detail = (result.stderr.strip() or result.stdout.strip()).rstrip(".")
+    return detail in {
+        f"Unit {SERVICE_NAME} could not be found",
+        f"Unit {SERVICE_NAME} not found",
+    }
+
+
 def _service_info(root: Path, systemctl: Path | None) -> dict[str, Any]:
-    expected = (root / SERVICE_NAME).resolve(strict=False)
     if systemctl is None:
-        return {
-            "available": False,
-            "loaded": False,
-            "active": False,
-            "enabled": False,
-            "fragment": "",
-            "owned": False,
-        }
-    load = _run_systemctl(systemctl, "show", SERVICE_NAME, "--property=LoadState", "--value", check=False)
-    load_state = load.stdout.strip() if load.returncode == 0 else "not-found"
-    fragment_result = _run_systemctl(
-        systemctl, "show", SERVICE_NAME, "--property=FragmentPath", "--value", check=False
+        return {"certainty": "unknown", "reason": "systemctl unavailable"}
+    result = _run_systemctl(
+        systemctl,
+        "show",
+        SERVICE_NAME,
+        "--property=LoadState",
+        "--property=FragmentPath",
+        "--property=ActiveState",
+        "--property=UnitFileState",
+        check=False,
     )
-    fragment = fragment_result.stdout.strip() if fragment_result.returncode == 0 else ""
-    loaded = load_state not in {"", "not-found", "error"}
-    owned = bool(fragment) and Path(fragment).resolve(strict=False) == expected
-    active = _run_systemctl(systemctl, "is-active", "--quiet", SERVICE_NAME, check=False).returncode == 0
-    enabled = _run_systemctl(systemctl, "is-enabled", "--quiet", SERVICE_NAME, check=False).returncode == 0
+    if result.returncode != 0:
+        if _verified_not_found(result):
+            return {"certainty": "known", "loaded": False, "active": False, "enabled": False, "owned": False}
+        return {"certainty": "unknown", "reason": "systemctl show failed"}
+    properties: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        key, separator, value = line.partition("=")
+        if separator:
+            properties[key] = value
+    load_state = properties.get("LoadState", "")
+    if load_state == "not-found":
+        return {"certainty": "known", "loaded": False, "active": False, "enabled": False, "owned": False}
+    required = {"LoadState", "FragmentPath", "ActiveState", "UnitFileState"}
+    if load_state != "loaded" or not required.issubset(properties):
+        return {"certainty": "unknown", "reason": "incomplete or unsupported systemctl state"}
+    fragment = properties["FragmentPath"]
+    expected = str(root / SERVICE_NAME)
+    owned = fragment == expected
+    active_state = properties["ActiveState"]
     return {
-        "available": True,
-        "loaded": loaded,
-        "active": active,
-        "enabled": enabled,
+        "certainty": "known",
+        "loaded": True,
+        "active": active_state == "active",
+        "active_state": active_state,
+        "enabled": properties["UnitFileState"] in {"enabled", "enabled-runtime", "linked", "linked-runtime"},
         "fragment": fragment,
         "owned": owned,
     }
 
 
+def _require_known_service(info: dict[str, Any], *, operation: str) -> None:
+    if info.get("certainty") != "known":
+        _fail(f"systemd service state is UNKNOWN; {operation} is blocked until systemctl queries succeed")
+
+
 def _assert_service_not_foreign(info: dict[str, Any]) -> None:
-    if info["loaded"] and not info["owned"]:
+    if info.get("certainty") == "known" and info.get("loaded") and not info.get("owned"):
         _fail(
-            f"existing user service {SERVICE_NAME} is not managed by this package ({info['fragment'] or 'unknown path'}); "
-            "refusing to replace it"
+            f"existing user service {SERVICE_NAME} is not the exact package-owned unit "
+            f"({info.get('fragment') or 'unknown path'}); refusing to replace it"
         )
 
 
 def _normalize_endpoint(endpoint: str) -> tuple[str, str]:
     parsed = urlsplit(endpoint.strip())
     if parsed.scheme.lower() != "https":
-        _fail("pairing endpoint must use HTTPS; plaintext HTTP/WS is unsupported by the secure installer")
+        _fail("pairing endpoint must use HTTPS")
     if not parsed.hostname or parsed.username is not None or parsed.password is not None:
         _fail("pairing endpoint must be an HTTPS origin without embedded credentials")
     if parsed.query or parsed.fragment:
         _fail("pairing endpoint must not contain a query string or fragment")
     path = parsed.path.rstrip("/")
-    normalized = urlunsplit(("https", parsed.netloc, path, "", ""))
+    endpoint_url = urlunsplit(("https", parsed.netloc, path, "", ""))
     websocket_path = f"{path}/api/ws" if path else "/api/ws"
-    websocket = urlunsplit(("wss", parsed.netloc, websocket_path, "", ""))
-    return normalized, websocket
+    websocket_url = urlunsplit(("wss", parsed.netloc, websocket_path, "", ""))
+    return endpoint_url, websocket_url
 
 
-def _read_token(path: Path, *, repair_mode: bool) -> str:
-    _ensure_regular(path, label="session token")
-    try:
-        token = path.read_text(encoding="ascii").strip()
-    except OSError as error:
-        _fail(f"cannot read session token: {error}")
-    if TOKEN_RE.fullmatch(token) is None:
-        _fail(f"session token is invalid; refusing to replace it silently: {path}")
-    if stat.S_IMODE(path.stat().st_mode) != SECRET_MODE:
-        if repair_mode:
-            path.chmod(SECRET_MODE)
-        else:
-            _fail(f"session token permissions must be 0600: {path}")
-    return token
-
-
-def _pairing_payload(endpoint: str | None, websocket: str | None, token: str, created_at: str) -> dict[str, Any]:
+def _pairing_payload(
+    *,
+    installation_id: str,
+    endpoint: str | None,
+    websocket: str | None,
+    external_token: str,
+    created_at: str,
+    sidecar_port: int,
+    upstream_port: int,
+) -> dict[str, Any]:
     return {
-        "schema": "hermes-mobile-pairing/v1",
+        "schema": PAIRING_SCHEMA,
+        "installation_id": installation_id,
         "created_at": created_at,
         "ready": endpoint is not None,
         "endpoint": endpoint,
@@ -412,251 +647,272 @@ def _pairing_payload(endpoint: str | None, websocket: str | None, token: str, cr
         "auth": {
             "mode": "session_token",
             "header": TOKEN_HEADER,
-            "token": token,
-            "websocket_query_parameter": "token",
-        },
-        "gateway": {"bind": BIND_HOST, "tls_terminated_by_ingress": True},
-        "native_oauth": {
-            "optional": True,
-            "required_for_session_token_pairing": False,
-            "discovery": "/api/status#auth_flows",
-            "authorize_path": "/auth/native/authorize",
+            "token": external_token,
             "ws_ticket_path": "/api/auth/ws-ticket",
+            "websocket_query_parameter": "ticket",
+            "ticket_ttl_seconds": TICKET_TTL_SECONDS,
+        },
+        "gateway": {
+            "sidecar_bind": BIND_HOST,
+            "sidecar_port": sidecar_port,
+            "official_upstream_bind": BIND_HOST,
+            "official_upstream_port": upstream_port,
+            "tls_terminated_by_ingress": True,
         },
     }
 
 
-def _launcher(root: Path, hermes: Path, port: int) -> bytes:
-    token_path = shlex.quote(str(root / "session.token"))
-    command = shlex.join([str(hermes), "serve", "--host", BIND_HOST, "--port", str(port)])
-    script = f"""#!/bin/sh
-set -eu
-umask 077
-unset PYTHONPATH PYTHONHOME
-export PYTHONDONTWRITEBYTECODE=1
-token_file={token_path}
-if [ ! -f "$token_file" ]; then
-    printf '%s\\n' "Hermes mobile gateway token file is missing" >&2
-    exit 78
-fi
-IFS= read -r HERMES_DASHBOARD_SESSION_TOKEN < "$token_file"
-case "$HERMES_DASHBOARD_SESSION_TOKEN" in
-    ''|*[!0-9a-f]*)
-        printf '%s\\n' "Hermes mobile gateway token file is invalid" >&2
-        exit 78
-        ;;
-esac
-if [ "${{#HERMES_DASHBOARD_SESSION_TOKEN}}" -ne 64 ]; then
-    printf '%s\\n' "Hermes mobile gateway token file is invalid" >&2
-    exit 78
-fi
-export HERMES_DASHBOARD_SESSION_TOKEN
-exec {command}
-"""
-    return script.encode("utf-8")
+def _launch_script(root: Path, probe: dict[str, Any], upstream_port: int, sidecar_port: int) -> bytes:
+    command = [
+        probe["python"],
+        "-I",
+        str(root / "bin" / "supervisor.py"),
+        "--hermes",
+        probe["command"],
+        "--sidecar",
+        str(root / "bin" / "sidecar.py"),
+        "--internal-token-file",
+        str(root / "internal.token"),
+        "--external-token-file",
+        str(root / "external.token"),
+        "--upstream-port",
+        str(upstream_port),
+        "--sidecar-port",
+        str(sidecar_port),
+    ]
+    return (
+        "#!/bin/sh\n"
+        "set -eu\n"
+        "umask 077\n"
+        "unset PYTHONPATH PYTHONHOME\n"
+        f"exec {shlex.join(command)}\n"
+    ).encode("utf-8")
 
 
-def _unit() -> bytes:
+def _systemd_quote(path: Path) -> str:
+    value = str(path)
+    if any(character in value for character in "\r\n\0"):
+        _fail("managed root contains characters unsupported by systemd")
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
+
+
+def _unit(root: Path) -> bytes:
     return f"""[Unit]
-Description=Hermes Mobile Gateway (additive loopback service)
+Description=Hermes Mobile credential-isolating sidecar
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=%h/.hermes/mobile-gateway/bin/launch
+ExecStart={_systemd_quote(root / "bin" / "launch")}
 Restart=no
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
+KillMode=mixed
+TimeoutStopSec=20
 
 [Install]
 WantedBy=default.target
 """.encode("utf-8")
 
 
+def _expected_files(root: Path, probe: dict[str, Any], upstream_port: int, sidecar_port: int) -> dict[str, bytes]:
+    return {
+        "bin/manage": _source_bytes(),
+        "bin/launch": _launch_script(root, probe, upstream_port, sidecar_port),
+        "bin/sidecar.py": _asset_bytes("sidecar.py"),
+        "bin/supervisor.py": _asset_bytes("supervisor.py"),
+        SERVICE_NAME: _unit(root),
+    }
+
+
 def _existing_matches(
     root: Path,
+    manifest: dict[str, Any],
     probe: dict[str, Any],
-    port: int,
+    upstream_port: int,
+    sidecar_port: int,
     endpoint: str | None,
-    expected_files: dict[Path, tuple[bytes, int]],
 ) -> bool:
-    manifest_path = root / "install.json"
-    runtime_path = root / "runtime.json"
-    token_path = root / "session.token"
-    pairing_path = root / "pairing.json"
-    if not all(path.exists() for path in (manifest_path, runtime_path, token_path, pairing_path)):
-        return False
-    manifest = _read_json(manifest_path, label="install manifest")
-    runtime = _read_json(runtime_path, label="runtime manifest")
-    token = _read_token(token_path, repair_mode=False)
-    pairing = _read_json(pairing_path, label="pairing manifest")
-    if endpoint is not None:
-        normalized, _ = _normalize_endpoint(endpoint)
-        if pairing.get("endpoint") != normalized:
-            return False
+    runtime = _read_json_verified(root / "runtime.json", label="runtime manifest")
+    pairing = _read_json_verified(root / "pairing.json", label="pairing manifest")
+    installation_id = manifest["installation_id"]
     expected_identity = {
+        "schema_version": 2,
+        "package_id": PACKAGE_ID,
+        "installation_id": installation_id,
         "installer_version": INSTALLER_VERSION,
-        "installer_source_sha256": hashlib.sha256(_source_bytes()).hexdigest(),
+        "installer_source_sha256": _sha256_bytes(_source_bytes()),
         "bind": BIND_HOST,
-        "port": port,
+        "upstream_port": upstream_port,
+        "sidecar_port": sidecar_port,
         "hermes_command": probe["command"],
         "hermes_command_sha256": probe["command_sha256"],
+        "hermes_python": probe["python"],
+        "hermes_python_sha256": probe["python_sha256"],
         "hermes_version": probe["version"],
+        "official_release_tag": OFFICIAL_RELEASE_TAG,
+        "official_commit": OFFICIAL_COMMIT,
     }
     if any(runtime.get(key) != value for key, value in expected_identity.items()):
         return False
-    if manifest.get("managed_root") != str(root) or pairing.get("auth", {}).get("token") != token:
+    if pairing.get("installation_id") != installation_id:
         return False
-    for path, (content, mode) in expected_files.items():
-        try:
-            metadata = path.lstat()
-        except FileNotFoundError:
-            return False
-        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
-            return False
-        if stat.S_IMODE(metadata.st_mode) != mode or path.read_bytes() != content:
-            return False
-    return True
+    if endpoint is not None and pairing.get("endpoint") != _normalize_endpoint(endpoint)[0]:
+        return False
+    expected_files = _expected_files(root, probe, upstream_port, sidecar_port)
+    return all((root / relative).read_bytes() == content for relative, content in expected_files.items())
 
 
 def _activate(root: Path, systemctl: Path, info: dict[str, Any]) -> None:
+    _require_known_service(info, operation="activation")
     _assert_service_not_foreign(info)
-    if info["active"]:
+    if info.get("active"):
         return
-    unit_path = root / SERVICE_NAME
-    if not info["owned"]:
-        _run_systemctl(systemctl, "link", str(unit_path))
-    _run_systemctl(systemctl, "daemon-reload")
+    if info.get("loaded") and info.get("active_state") != "inactive":
+        _fail(f"service state {info.get('active_state')} is not safe for activation")
+    if not info.get("loaded"):
+        _run_systemctl(systemctl, "link", str(root / SERVICE_NAME))
+        _run_systemctl(systemctl, "daemon-reload")
     _run_systemctl(systemctl, "enable", "--now", SERVICE_NAME)
+    refreshed = _service_info(root, systemctl)
+    _require_known_service(refreshed, operation="activation verification")
+    if not refreshed.get("loaded") or not refreshed.get("owned") or not refreshed.get("active"):
+        _fail("service activation could not be verified against the exact package-owned unit")
 
 
 def _install(args: argparse.Namespace) -> dict[str, Any]:
     root = _mobile_root()
-    _ensure_managed_root(root)
-    probe = _probe_hermes(args.hermes)
+    root_state = _classify_root(root)
+    manifest = _validate_installation(root) if root_state == "installed" else None
+    probe = _probe_hermes(args.hermes, args.python)
     hermes = Path(probe["command"])
     systemctl = _systemctl()
     info = _service_info(root, systemctl)
     _assert_service_not_foreign(info)
-    if not args.no_activate and systemctl is None:
-        _fail("systemctl is required to activate the user service; use --no-activate to install resources only")
+    if not args.no_activate:
+        _require_known_service(info, operation="activation")
+        if systemctl is None:
+            _fail("systemctl is required for activation")
 
     endpoint: str | None = None
     websocket: str | None = None
     if args.endpoint:
         endpoint, websocket = _normalize_endpoint(args.endpoint)
 
-    source = _source_bytes()
-    expected_files = {
-        root / "bin" / "manage": (source, EXECUTABLE_MODE),
-        root / "bin" / "launch": (_launcher(root, hermes, args.port), EXECUTABLE_MODE),
-        root / SERVICE_NAME: (_unit(), SECRET_MODE),
-    }
-    if root.exists() and _existing_matches(root, probe, args.port, endpoint, expected_files):
-        if info["active"] or args.no_activate:
+    if manifest is not None and _existing_matches(
+        root,
+        manifest,
+        probe,
+        args.upstream_port,
+        args.sidecar_port,
+        endpoint,
+    ):
+        if info.get("active") or args.no_activate:
             return {
                 "action": "already-installed",
                 "root": str(root),
-                "service_active": bool(info["active"]),
-                "bind": BIND_HOST,
-                "port": args.port,
+                "service_state": "active" if info.get("active") else info.get("certainty", "unknown"),
+                "upstream_port": args.upstream_port,
+                "sidecar_port": args.sidecar_port,
             }
         _assert_no_running_hermes(hermes)
-        _assert_port_available(args.port)
+        _assert_port_available(args.upstream_port, label="official upstream")
+        _assert_port_available(args.sidecar_port, label="sidecar")
         if args.dry_run:
-            return {
-                "action": "would-activate",
-                "root": str(root),
-                "service_active": False,
-                "bind": BIND_HOST,
-                "port": args.port,
-            }
+            return {"action": "would-activate", "root": str(root), "sidecar_port": args.sidecar_port}
         assert systemctl is not None
         _activate(root, systemctl, info)
-        return {
-            "action": "activated-existing-install",
-            "root": str(root),
-            "service_active": True,
-            "bind": BIND_HOST,
-            "port": args.port,
-        }
+        return {"action": "activated-existing-install", "root": str(root), "sidecar_port": args.sidecar_port}
 
-    if info["active"]:
-        _fail(
-            f"managed service {SERVICE_NAME} is active but installed resources differ; "
-            "this installer never restarts or replaces a running service. Stop it explicitly, then retry."
-        )
+    if manifest is not None:
+        if info.get("active"):
+            _fail("the owned service is active but its resources differ; this package never restarts it")
+        _fail("installed resources differ from this package; automatic replacement is disabled")
+    if root_state not in {"absent", "empty"}:
+        _fail("managed root is not safe for installation")
+    if info.get("loaded"):
+        _fail("a service registration already exists without a verified package installation")
+
     _assert_no_running_hermes(hermes)
-    _assert_port_available(args.port)
+    _assert_port_available(args.upstream_port, label="official upstream")
+    _assert_port_available(args.sidecar_port, label="sidecar")
     if args.dry_run:
         return {
             "action": "would-install",
             "root": str(root),
-            "service_active": False,
             "activate": not args.no_activate,
-            "bind": BIND_HOST,
-            "port": args.port,
+            "upstream_port": args.upstream_port,
+            "sidecar_port": args.sidecar_port,
         }
 
-    if root.exists() and (root / "install.json").exists():
-        _fail(
-            "installed resources differ from this package; automatic replacement is disabled. "
-            "Use status, stop the additive service explicitly if active, then uninstall/rollback before reinstalling."
-        )
+    _ensure_parent(root, create=True)
+    if root_state == "absent":
+        _mkdir_exact(root)
+    _mkdir_exact(root / "bin")
 
-    if not root.parent.exists():
-        root.parent.mkdir(mode=DIRECTORY_MODE, parents=True)
-    _mkdir_managed(root)
-    bin_dir = root / "bin"
-    _mkdir_managed(bin_dir)
+    installation_id = secrets.token_hex(16)
+    internal_token = secrets.token_hex(32)
+    external_token = secrets.token_hex(32)
+    installed_at = _utc_now()
+    _atomic_write(root / "internal.token", (internal_token + "\n").encode("ascii"), SECRET_MODE)
+    _atomic_write(root / "external.token", (external_token + "\n").encode("ascii"), SECRET_MODE)
 
-    token_path = root / "session.token"
-    if token_path.exists():
-        token = _read_token(token_path, repair_mode=True)
-    else:
-        token = secrets.token_hex(32)
-        _atomic_write(token_path, (token + "\n").encode("ascii"), SECRET_MODE)
+    for relative, content in _expected_files(root, probe, args.upstream_port, args.sidecar_port).items():
+        _atomic_write(root / relative, content, _FILE_LAYOUT[relative])
 
-    created_at = _utc_now()
-    pairing_path = root / "pairing.json"
-    pairing = _pairing_payload(endpoint, websocket, token, created_at)
-    _write_json(pairing_path, pairing)
-    for path, (content, mode) in expected_files.items():
-        _atomic_write(path, content, mode)
-
+    pairing = _pairing_payload(
+        installation_id=installation_id,
+        endpoint=endpoint,
+        websocket=websocket,
+        external_token=external_token,
+        created_at=installed_at,
+        sidecar_port=args.sidecar_port,
+        upstream_port=args.upstream_port,
+    )
     runtime = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "package_id": PACKAGE_ID,
+        "installation_id": installation_id,
         "installer_version": INSTALLER_VERSION,
-        "installer_source_sha256": hashlib.sha256(source).hexdigest(),
-        "installed_at": created_at,
+        "installer_source_sha256": _sha256_bytes(_source_bytes()),
+        "installed_at": installed_at,
         "bind": BIND_HOST,
-        "port": args.port,
+        "upstream_port": args.upstream_port,
+        "sidecar_port": args.sidecar_port,
         "hermes_command": probe["command"],
         "hermes_command_sha256": probe["command_sha256"],
+        "hermes_python": probe["python"],
+        "hermes_python_sha256": probe["python_sha256"],
         "hermes_version": probe["version"],
+        "official_release_tag": OFFICIAL_RELEASE_TAG,
+        "official_commit": OFFICIAL_COMMIT,
     }
     capabilities = dict(probe)
-    capabilities["probed_at"] = created_at
-    manifest = {
-        "schema_version": 1,
-        "managed_root": str(root),
-        "installed_at": created_at,
-        "installer_version": INSTALLER_VERSION,
-        "official_files_modified": [],
-        "rollback": "remove this additive installation",
-    }
+    capabilities.update(
+        {
+            "package_id": PACKAGE_ID,
+            "installation_id": installation_id,
+            "probed_at": installed_at,
+            "external_auth": "HTTPS header",
+            "websocket_auth": "30-second single-use ticket",
+        }
+    )
     rollback = {
-        "schema_version": 1,
-        "action": "remove-installation",
-        "created_at": created_at,
+        "schema_version": 2,
+        "package_id": PACKAGE_ID,
+        "installation_id": installation_id,
+        "action": "remove-verified-inventory",
+        "created_at": installed_at,
         "scope": str(root),
     }
+    _write_json(root / "pairing.json", pairing)
     _write_json(root / "runtime.json", runtime)
     _write_json(root / "capabilities.json", capabilities)
     _write_json(root / "rollback.json", rollback)
-    _write_json(root / "install.json", manifest)
+    _write_install_manifest(root, installation_id=installation_id, installed_at=installed_at)
+    _validate_installation(root)
 
     if not args.no_activate:
         assert systemctl is not None
@@ -666,79 +922,133 @@ def _install(args: argparse.Namespace) -> dict[str, Any]:
         "action": "installed",
         "root": str(root),
         "service_active": not args.no_activate,
-        "bind": BIND_HOST,
-        "port": args.port,
+        "upstream_port": args.upstream_port,
+        "sidecar_port": args.sidecar_port,
         "pairing_ready": endpoint is not None,
     }
 
 
 def _status(_args: argparse.Namespace) -> dict[str, Any]:
     root = _mobile_root()
-    _ensure_managed_root(root)
-    if not root.exists() or not (root / "install.json").exists():
-        return {"installed": False, "root": str(root), "service_active": False}
-    runtime = _read_json(root / "runtime.json", label="runtime manifest")
-    pairing = _read_json(root / "pairing.json", label="pairing manifest")
+    root_state = _classify_root(root)
+    if root_state in {"absent", "empty"}:
+        return {"installed": False, "root": str(root), "service_state": "not-installed"}
+    manifest = _validate_installation(root)
+    runtime = _read_json_verified(root / "runtime.json", label="runtime manifest")
+    pairing = _read_json_verified(root / "pairing.json", label="pairing manifest")
+    if runtime.get("installation_id") != manifest["installation_id"]:
+        _fail("runtime manifest installation ID mismatch")
     info = _service_info(root, _systemctl())
     _assert_service_not_foreign(info)
+    service_state = "unknown"
+    if info.get("certainty") == "known":
+        service_state = info.get("active_state", "absent") if info.get("loaded") else "absent"
     return {
         "installed": True,
         "root": str(root),
+        "package_id": PACKAGE_ID,
+        "installation_id": manifest["installation_id"],
         "installer_version": runtime.get("installer_version"),
         "hermes_version": runtime.get("hermes_version"),
-        "hermes_command": runtime.get("hermes_command"),
         "bind": runtime.get("bind"),
-        "port": runtime.get("port"),
+        "upstream_port": runtime.get("upstream_port"),
+        "sidecar_port": runtime.get("sidecar_port"),
         "pairing_ready": bool(pairing.get("ready")),
-        "service_active": bool(info["active"]),
-        "service_enabled": bool(info["enabled"]),
+        "service_state": service_state,
+        "service_active": info.get("active") if info.get("certainty") == "known" else None,
+        "service_enabled": info.get("enabled") if info.get("certainty") == "known" else None,
     }
 
 
 def _pair(args: argparse.Namespace) -> dict[str, Any]:
     root = _mobile_root()
-    _ensure_managed_root(root, allow_absent=False)
+    if _classify_root(root) != "installed":
+        _fail(f"mobile sidecar is not installed at {root}")
+    manifest = _validate_installation(root)
+    runtime = _read_json_verified(root / "runtime.json", label="runtime manifest")
     endpoint, websocket = _normalize_endpoint(args.endpoint)
-    token = _read_token(root / "session.token", repair_mode=not args.dry_run)
-    pairing_path = root / "pairing.json"
-    existing = _read_json(pairing_path, label="pairing manifest") if pairing_path.exists() else {}
-    if existing.get("endpoint") == endpoint and existing.get("auth", {}).get("token") == token:
-        return {"action": "already-paired", "path": str(pairing_path), "endpoint": endpoint}
+    external_token = _read_token_verified(root / "external.token", label="external token")
+    existing = _read_json_verified(root / "pairing.json", label="pairing manifest")
+    if existing.get("endpoint") == endpoint:
+        return {"action": "already-paired", "path": str(root / "pairing.json"), "endpoint": endpoint}
     if args.dry_run:
-        return {"action": "would-pair", "path": str(pairing_path), "endpoint": endpoint}
-    payload = _pairing_payload(endpoint, websocket, token, _utc_now())
-    _write_json(pairing_path, payload)
-    return {"action": "paired", "path": str(pairing_path), "endpoint": endpoint}
+        return {"action": "would-pair", "path": str(root / "pairing.json"), "endpoint": endpoint}
+    payload = _pairing_payload(
+        installation_id=manifest["installation_id"],
+        endpoint=endpoint,
+        websocket=websocket,
+        external_token=external_token,
+        created_at=_utc_now(),
+        sidecar_port=int(runtime["sidecar_port"]),
+        upstream_port=int(runtime["upstream_port"]),
+    )
+    _write_json(root / "pairing.json", payload)
+    _write_install_manifest(
+        root,
+        installation_id=manifest["installation_id"],
+        installed_at=str(manifest["installed_at"]),
+    )
+    _validate_installation(root)
+    return {"action": "paired", "path": str(root / "pairing.json"), "endpoint": endpoint}
+
+
+def _remove_verified_tree(root: Path) -> None:
+    for relative in sorted(_FILE_LAYOUT, key=lambda value: (value.count("/"), value), reverse=True):
+        (root / relative).unlink()
+    (root / "bin").rmdir()
+    root.rmdir()
 
 
 def _remove(args: argparse.Namespace, *, operation: str) -> dict[str, Any]:
     root = _mobile_root()
-    _ensure_managed_root(root)
-    if not root.exists():
+    root_state = _classify_root(root)
+    if root_state in {"absent", "empty"}:
+        if root_state == "empty":
+            _fail("an empty managed root exists but is not a verified installation")
         return {"action": "not-installed", "root": str(root), "operation": operation}
+    manifest = _validate_installation(root)
+    runtime = _read_json_verified(root / "runtime.json", label="runtime manifest")
+    if runtime.get("installation_id") != manifest["installation_id"]:
+        _fail("runtime manifest installation ID mismatch")
+
     systemctl = _systemctl()
     info = _service_info(root, systemctl)
+    _require_known_service(info, operation=operation)
     _assert_service_not_foreign(info)
-    if info["active"]:
+    if info.get("loaded") and info.get("active_state") != "inactive":
         _fail(
-            f"{SERVICE_NAME} is active. This manager never stops an existing service automatically. "
-            f"Stop it explicitly with 'systemctl --user stop {SERVICE_NAME}', verify it is inactive, then retry."
+            f"{SERVICE_NAME} is {info.get('active_state')}; this manager never stops a process automatically. "
+            "Stop this exact package-owned service and verify it is inactive before retrying."
         )
+    for key in ("upstream_port", "sidecar_port"):
+        port = runtime.get(key)
+        if not isinstance(port, int):
+            _fail(f"runtime manifest has invalid {key}")
+        if _port_listening(port):
+            _fail(f"loopback port {port} still has a listener; refusing to remove files used by a process")
+
     if args.dry_run:
         return {"action": "would-remove", "root": str(root), "operation": operation}
     if not args.yes:
-        _fail(f"{operation} removes the additive service files and pairing secret; rerun with --yes")
-    if systemctl is not None and info["owned"]:
-        if info["enabled"]:
+        _fail(f"{operation} removes the verified sidecar credentials and files; rerun with --yes")
+    assert systemctl is not None
+    if info.get("loaded"):
+        if info.get("enabled"):
             _run_systemctl(systemctl, "disable", SERVICE_NAME)
-        _run_systemctl(systemctl, "unlink", SERVICE_NAME, check=False)
+        _run_systemctl(systemctl, "unlink", SERVICE_NAME)
         _run_systemctl(systemctl, "daemon-reload")
-    shutil.rmtree(root)
+        refreshed = _service_info(root, systemctl)
+        _require_known_service(refreshed, operation=f"{operation} verification")
+        if refreshed.get("loaded"):
+            _fail("service unlink could not be verified; managed files were retained")
+
+    _validate_installation(root)
+    _remove_verified_tree(root)
     return {"action": "removed", "root": str(root), "operation": operation}
 
 
 def _probe_command(args: argparse.Namespace) -> dict[str, Any]:
-    return _probe_hermes(args.hermes)
+    return _probe_hermes(args.hermes, args.python)
 
 
 def _emit(result: dict[str, Any], *, as_json: bool) -> None:
@@ -747,80 +1057,85 @@ def _emit(result: dict[str, Any], *, as_json: bool) -> None:
         return
     action = result.get("action")
     if action == "already-installed":
-        print("Hermes mobile gateway is already installed; no files or service were changed.")
+        print("The Hermes Mobile sidecar is already installed; nothing changed.")
     elif action == "installed":
-        print(f"Installed additive Hermes mobile gateway resources in {result['root']}.")
-        print(f"Service bind: {result['bind']}:{result['port']} (loopback only).")
-        print("TLS ingress is required before pairing a mobile device.")
+        print(f"Installed the additive sidecar in {result['root']}.")
+        print(f"Official upstream: {BIND_HOST}:{result['upstream_port']} (loopback only).")
+        print(f"TLS ingress target: {BIND_HOST}:{result['sidecar_port']} (loopback only).")
     elif action == "would-install":
         print(f"Dry run: would install additive resources in {result['root']}.")
-        print(f"Dry run: service would bind {result['bind']}:{result['port']} (loopback only).")
-        if result.get("activate"):
-            print("Dry run: would link and start a new systemd user service after conflict checks.")
+        print(f"Dry run: official upstream would bind {BIND_HOST}:{result['upstream_port']}.")
+        print(f"Dry run: sidecar would bind {BIND_HOST}:{result['sidecar_port']}.")
     elif action == "would-activate":
-        print(f"Dry run: would activate the existing service on {result['bind']}:{result['port']}.")
+        print(f"Dry run: would activate the verified sidecar on {BIND_HOST}:{result['sidecar_port']}.")
     elif action == "activated-existing-install":
-        print("Activated the existing additive Hermes mobile gateway installation.")
+        print("Activated the verified Hermes Mobile sidecar installation.")
     elif action in {"paired", "already-paired", "would-pair"}:
         prefix = "Dry run: would write" if action == "would-pair" else "Pairing manifest is at"
         print(f"{prefix} {result['path']} for {result['endpoint']}.")
     elif action in {"would-remove", "removed"}:
         verb = "would remove" if action == "would-remove" else "removed"
-        print(f"{result['operation'].capitalize()} {verb} only {result['root']}.")
+        print(f"{result['operation'].capitalize()} {verb} only the verified inventory at {result['root']}.")
     elif action == "not-installed":
-        print(f"Hermes mobile gateway is not installed at {result['root']}.")
+        print(f"The Hermes Mobile sidecar is not installed at {result['root']}.")
     elif "compatible" in result:
         print(f"Compatible official Hermes {result['version']} at {result['command']}")
-        print(f"Capabilities: hermes serve {' '.join(result['serve_flags'])}; loopback session pairing supported.")
+        print(f"Pinned proof baseline: {result['official_release_tag']} / {result['official_commit']}")
     elif "installed" in result:
         if not result["installed"]:
-            print(f"Hermes mobile gateway is not installed at {result['root']}.")
+            print(f"The Hermes Mobile sidecar is not installed at {result['root']}.")
         else:
-            state = "active" if result["service_active"] else "inactive"
-            print(f"Hermes mobile gateway: {state}")
-            print(f"Bind: {result['bind']}:{result['port']} (loopback only)")
+            print(f"Hermes mobile sidecar service: {result['service_state']}")
+            print(f"Official upstream: {BIND_HOST}:{result['upstream_port']} (loopback only)")
+            print(f"TLS ingress target: {BIND_HOST}:{result['sidecar_port']} (loopback only)")
             print(f"Pairing ready: {'yes' if result['pairing_ready'] else 'no'}")
     else:
         print(json.dumps(result, indent=2, sort_keys=True))
 
 
+def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--hermes", help="official Hermes executable")
+    parser.add_argument("--python", help="Python from the official Hermes environment")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="hermes-mobile-gateway",
-        description="Manage an additive loopback mobile gateway using the installed official Hermes CLI.",
+        description="Manage the independent Hermes Mobile sidecar for official Hermes v0.20.1.",
     )
     parser.add_argument("--version", action="version", version=INSTALLER_VERSION)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    probe = subparsers.add_parser("probe", help="check the installed official Hermes version and serve capabilities")
-    probe.add_argument("--hermes", help="official Hermes executable (default: resolve hermes on PATH)")
-    probe.add_argument("--json", action="store_true", help="emit machine-readable output")
+    probe = subparsers.add_parser("probe", help="verify the pinned official Hermes runtime")
+    _add_runtime_options(probe)
+    probe.add_argument("--json", action="store_true")
     probe.set_defaults(handler=_probe_command)
 
-    install = subparsers.add_parser("install", help="install additive resources and a loopback user service")
-    install.add_argument("--hermes", help="official Hermes executable (default: resolve hermes on PATH)")
-    install.add_argument("--port", type=int, default=DEFAULT_PORT, choices=range(1024, 65536))
-    install.add_argument("--endpoint", help="public/private HTTPS ingress URL to place in pairing.json")
-    install.add_argument("--no-activate", action="store_true", help="write the service but do not link or start it")
-    install.add_argument("--dry-run", action="store_true", help="probe and print the plan without changing files/services")
-    install.add_argument("--json", action="store_true", help="emit machine-readable output")
+    install = subparsers.add_parser("install", help="install the official-loopback plus sidecar service")
+    _add_runtime_options(install)
+    install.add_argument("--upstream-port", type=int, default=DEFAULT_UPSTREAM_PORT, choices=range(1024, 65536))
+    install.add_argument("--sidecar-port", type=int, default=DEFAULT_SIDECAR_PORT, choices=range(1024, 65536))
+    install.add_argument("--endpoint", help="HTTPS ingress URL placed in pairing.json")
+    install.add_argument("--no-activate", action="store_true")
+    install.add_argument("--dry-run", action="store_true")
+    install.add_argument("--json", action="store_true")
     install.set_defaults(handler=_install)
 
-    pair = subparsers.add_parser("pair", help="write a 0600 pairing manifest for an HTTPS ingress")
-    pair.add_argument("--endpoint", required=True, help="HTTPS ingress URL visible to the mobile device")
-    pair.add_argument("--dry-run", action="store_true", help="validate and print the plan without writing")
-    pair.add_argument("--json", action="store_true", help="emit machine-readable output")
+    pair = subparsers.add_parser("pair", help="write the HTTPS/header/ticket pairing manifest")
+    pair.add_argument("--endpoint", required=True)
+    pair.add_argument("--dry-run", action="store_true")
+    pair.add_argument("--json", action="store_true")
     pair.set_defaults(handler=_pair)
 
-    status = subparsers.add_parser("status", help="show additive installation and user-service status")
-    status.add_argument("--json", action="store_true", help="emit machine-readable output")
+    status = subparsers.add_parser("status", help="validate inventory and show service state")
+    status.add_argument("--json", action="store_true")
     status.set_defaults(handler=_status)
 
     for name in ("rollback", "uninstall"):
-        remove = subparsers.add_parser(name, help=f"{name} only the additive mobile gateway resources")
-        remove.add_argument("--dry-run", action="store_true", help="print the removal plan without changing anything")
-        remove.add_argument("--yes", action="store_true", help="confirm removal of the pairing secret and managed root")
-        remove.add_argument("--json", action="store_true", help="emit machine-readable output")
+        remove = subparsers.add_parser(name, help=f"{name} only the verified package inventory")
+        remove.add_argument("--dry-run", action="store_true")
+        remove.add_argument("--yes", action="store_true")
+        remove.add_argument("--json", action="store_true")
         remove.set_defaults(handler=lambda args, operation=name: _remove(args, operation=operation))
     return parser
 
@@ -828,6 +1143,9 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if getattr(args, "upstream_port", None) == getattr(args, "sidecar_port", object()):
+        print("error: upstream and sidecar ports must differ", file=sys.stderr)
+        return 1
     try:
         result = args.handler(args)
     except InstallError as error:
