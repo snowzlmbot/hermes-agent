@@ -252,8 +252,8 @@ class GatewayRestClient(
     val call = httpClient.newCall(request)
     continuation.invokeOnCancellation { call.cancel() }
     call.enqueue(object : okhttp3.Callback {
-      override fun onFailure(call: okhttp3.Call, error: java.io.IOException) {
-        if (continuation.isActive) continuation.resumeWithException(error)
+      override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
+        if (continuation.isActive) continuation.resumeWithException(e)
       }
 
       override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {

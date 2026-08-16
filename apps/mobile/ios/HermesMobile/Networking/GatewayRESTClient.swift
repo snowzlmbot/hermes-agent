@@ -196,7 +196,7 @@ public actor GatewayRESTClient {
         guard !isInvalidated else { throw GatewayRESTError.expiredSession }
         let attemptedAuth = credentials.auth
         let request = try makeRequest(attemptedAuth)
-        let (data, response) = try await data(for: request, auth: attemptedAuth)
+        let (data, response) = try await authenticatedData(for: request, auth: attemptedAuth)
         guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
         guard http.statusCode == 401 else {
             return try Self.validatedData(data, response: http)
@@ -205,14 +205,14 @@ public actor GatewayRESTClient {
         try await refreshOAuthAfterUnauthorized(authUsed: attemptedAuth)
         guard !isInvalidated else { throw GatewayRESTError.expiredSession }
         let retry = try makeRequest(credentials.auth)
-        let (retryData, retryResponse) = try await data(for: retry, auth: credentials.auth)
+        let (retryData, retryResponse) = try await authenticatedData(for: retry, auth: credentials.auth)
         guard let retryHTTP = retryResponse as? HTTPURLResponse else {
             throw GatewayRESTError.invalidResponse
         }
         return try Self.validatedData(retryData, response: retryHTTP)
     }
 
-    private func data(for request: URLRequest, auth: StoredGatewayAuth) async throws -> (Data, URLResponse) {
+    private func authenticatedData(for request: URLRequest, auth: StoredGatewayAuth) async throws -> (Data, URLResponse) {
         switch auth {
         case .token:
             return try await session.data(for: request, delegate: CredentialRedirectPolicy.shared)
