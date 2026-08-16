@@ -9,7 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -48,7 +48,7 @@ class CriticalUxTest {
       }
     }
 
-    compose.onNodeWithContentDescription("Session actions").performClick()
+    compose.onAllNodesWithContentDescription("Session actions")[0].performClick()
     compose.onNodeWithText("Delete").performClick()
 
     compose.onNodeWithText("Delete session?").assertIsDisplayed()
@@ -57,7 +57,7 @@ class CriticalUxTest {
     compose.onNodeWithTag("cancel-delete-session").performClick()
     assertEquals(emptyList<String>(), deleted)
 
-    compose.onNodeWithContentDescription("Session actions").performClick()
+    compose.onAllNodesWithContentDescription("Session actions")[0].performClick()
     compose.onNodeWithText("Delete").performClick()
     compose.runOnIdle { sessions = listOf(otherSession, session) }
     compose.onNodeWithTag("confirm-delete-session").performClick()
