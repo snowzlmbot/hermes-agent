@@ -99,8 +99,17 @@ def _free_loopback_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def _json_request(url: str, *, token: str | None = None) -> tuple[int, dict[str, Any]]:
-    request = urllib.request.Request(url)
+def _json_request(
+    url: str,
+    *,
+    token: str | None = None,
+    method: str = "GET",
+    body: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    payload = None if body is None else json.dumps(body).encode("utf-8")
+    request = urllib.request.Request(url, data=payload, method=method)
+    if body is not None:
+        request.add_header("Content-Type", "application/json")
     if token is not None:
         request.add_header(TOKEN_HEADER, token)
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -108,12 +117,12 @@ def _json_request(url: str, *, token: str | None = None) -> tuple[int, dict[str,
         with opener.open(request, timeout=5) as response:
             return response.status, json.loads(response.read())
     except urllib.error.HTTPError as error:
-        body = error.read()
+        response_body = error.read()
         try:
-            payload = json.loads(body)
+            parsed = json.loads(response_body)
         except json.JSONDecodeError:
-            payload = {"raw": body.decode("utf-8", "replace")}
-        return error.code, payload
+            parsed = {"raw": response_body.decode("utf-8", "replace")}
+        return error.code, parsed
 
 
 def _wait_ready(process: subprocess.Popen[bytes], base_url: str, log_path: Path) -> dict[str, Any]:
@@ -135,10 +144,10 @@ def _wait_ready(process: subprocess.Popen[bytes], base_url: str, log_path: Path)
     raise AssertionError(f"official hermes serve did not become ready ({last_error}): {output}")
 
 
-def _assert_websocket_upgrade(host: str, port: int, token: str) -> None:
+def _assert_websocket_upgrade(host: str, port: int, ticket: str) -> None:
     websocket_key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
     request = (
-        f"GET /api/ws?token={token} HTTP/1.1\r\n"
+        f"GET /api/ws?ticket={ticket} HTTP/1.1\r\n"
         f"Host: {host}:{port}\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
@@ -235,10 +244,16 @@ def test_pinned_official_gateway_supports_loopback_session_http_and_websocket() 
 
             unauthorized_status, _ = _json_request(f"{base_url}/api/sessions")
             assert unauthorized_status == 401
-            authorized_status, sessions = _json_request(f"{base_url}/api/sessions", token=token)
-            assert authorized_status == 200
-            assert isinstance(sessions.get("sessions"), list)
-            _assert_websocket_upgrade("127.0.0.1", port, token)
+            ticket_status, ticket_payload = _json_request(
+                f"{base_url}/api/auth/ws-ticket",
+                token=token,
+                method="POST",
+                body={},
+            )
+            assert ticket_status == 200, ticket_payload
+            ticket = ticket_payload.get("ticket")
+            assert isinstance(ticket, str) and ticket
+            _assert_websocket_upgrade("127.0.0.1", port, ticket)
         finally:
             if process.poll() is None:
                 process.terminate()
