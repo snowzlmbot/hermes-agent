@@ -498,10 +498,16 @@ final class ChatModelTests: XCTestCase {
             profileScope: "profile-a"
         )
         var signals: [ChatSignal] = []
+        let signalsReceived = expectation(description: "deduplicated completion and approval signals")
+        signalsReceived.expectedFulfillmentCount = 2
+        signalsReceived.assertForOverFulfill = true
 
         try await model.connect()
         model.setRuntimeSession(runtimeID: "runtime-1", storedID: "stored-1")
-        model.signalHandler = { signals.append($0) }
+        model.signalHandler = {
+            signals.append($0)
+            signalsReceived.fulfill()
+        }
 
         let completion = GatewayEvent(
             type: .messageComplete,
@@ -527,10 +533,7 @@ final class ChatModelTests: XCTestCase {
         await socket.pushEvent(approval)
         await socket.pushEvent(approval)
 
-        for _ in 0..<100 {
-            if signals.count == 2 { break }
-            await Task.yield()
-        }
+        await fulfillment(of: [signalsReceived], timeout: 2)
 
         XCTAssertEqual(model.state.messages.map(\.text), ["answer"])
         XCTAssertEqual(model.state.approval?.command, "private command")
