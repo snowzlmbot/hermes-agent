@@ -47,14 +47,16 @@ enum NativeOAuthTransportPolicy {
     }
 }
 
-final class NativeOAuthRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    static let shared = NativeOAuthRedirectPolicy()
+final class CredentialRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    static let shared = CredentialRedirectPolicy()
 
     static func redirectedRequest(_ request: URLRequest, response: HTTPURLResponse) -> URLRequest? {
         guard let source = response.url,
               let destination = request.url,
-              source.scheme?.lowercased() == "https",
-              destination.scheme?.lowercased() == "https",
+              let sourceScheme = source.scheme?.lowercased(),
+              let destinationScheme = destination.scheme?.lowercased(),
+              ["http", "https"].contains(sourceScheme),
+              sourceScheme == destinationScheme,
               source.host?.lowercased() == destination.host?.lowercased(),
               effectivePort(source) == effectivePort(destination),
               source.path == destination.path,
@@ -74,7 +76,12 @@ final class NativeOAuthRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchec
     }
 
     private static func effectivePort(_ url: URL) -> Int? {
-        url.port ?? (url.scheme?.lowercased() == "https" ? 443 : nil)
+        if let port = url.port { return port }
+        switch url.scheme?.lowercased() {
+        case "https": return 443
+        case "http": return 80
+        default: return nil
+        }
     }
 }
 

@@ -67,13 +67,16 @@ final class NativeOAuthTests: XCTestCase {
                     headerFields: ["Location": destination.absoluteString]
                 )!
                 XCTAssertNil(
-                    NativeOAuthRedirectPolicy.redirectedRequest(
+                    CredentialRedirectPolicy.redirectedRequest(
                         URLRequest(url: destination),
                         response: response
                     )
                 )
             }
         }
+        let source = URL(string: "http://127.0.0.1:9120/api/sessions")!
+        let response = HTTPURLResponse(url: source, statusCode: 307, httpVersion: nil, headerFields: nil)!
+        XCTAssertNotNil(CredentialRedirectPolicy.redirectedRequest(URLRequest(url: source), response: response))
     }
 
     func testAuthorizationURLUsesRegisteredCallbackAndPKCE() throws {

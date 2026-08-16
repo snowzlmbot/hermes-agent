@@ -80,7 +80,7 @@ public actor GatewayRESTClient {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, response) = try await session.data(
             for: request,
-            delegate: NativeOAuthRedirectPolicy.shared
+            delegate: CredentialRedirectPolicy.shared
         )
         guard let http = response as? HTTPURLResponse,
               (200 ..< 300).contains(http.statusCode),
@@ -103,7 +103,7 @@ public actor GatewayRESTClient {
         )
         let (data, response) = try await session.data(
             for: request,
-            delegate: NativeOAuthRedirectPolicy.shared
+            delegate: CredentialRedirectPolicy.shared
         )
         guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
         guard (200 ..< 300).contains(http.statusCode) else {
@@ -215,9 +215,9 @@ public actor GatewayRESTClient {
     private func data(for request: URLRequest, auth: StoredGatewayAuth) async throws -> (Data, URLResponse) {
         switch auth {
         case .token:
-            return try await session.data(for: request)
+            return try await session.data(for: request, delegate: CredentialRedirectPolicy.shared)
         case .oauth:
-            return try await session.data(for: request, delegate: NativeOAuthRedirectPolicy.shared)
+            return try await session.data(for: request, delegate: CredentialRedirectPolicy.shared)
         }
     }
 
@@ -293,7 +293,7 @@ public actor GatewayRESTClient {
         ])
         let (data, response) = try await session.data(
             for: request,
-            delegate: NativeOAuthRedirectPolicy.shared
+            delegate: CredentialRedirectPolicy.shared
         )
         guard let http = response as? HTTPURLResponse else { throw GatewayRESTError.invalidResponse }
         guard (200 ..< 300).contains(http.statusCode) else {
