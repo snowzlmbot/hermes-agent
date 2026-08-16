@@ -99,6 +99,8 @@
 "notification.approval.body" = "一个会话需要你的批准";
 "notification.input.body" = "一个会话正在等待输入";
 "audio.microphone.error" = "录制语音需要麦克风权限。";
+"audio.recording.error" = "无法录制语音消息。";
+"audio.recording.limit" = "录音已达到一分钟上限并自动停止。";
 "audio.transcription.error" = "无法转写语音消息。";
 "audio.playback.error" = "无法朗读回复。";
 "demo.session.title" = "欢迎";
@@ -122,6 +124,7 @@
 "error.message.send" = "无法发送消息。";
 "error.message.stop" = "无法停止回复。";
 "error.attachment.upload" = "无法上传附件。";
+"error.attachment.import" = "无法导入所选照片或文件。";
 "error.gateway" = "网关报告了错误。";
 "error.model.options" = "无法加载可用模型。";
 "error.model.switch" = "无法切换模型。";

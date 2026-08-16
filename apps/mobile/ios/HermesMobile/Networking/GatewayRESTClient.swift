@@ -336,3 +336,5 @@ public actor GatewayRESTClient {
         )
     }
 }
+
+extension GatewayRESTClient: AudioTranscriptionClient {}

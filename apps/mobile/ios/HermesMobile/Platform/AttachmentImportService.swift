@@ -1,10 +1,15 @@
 import Foundation
 import UniformTypeIdentifiers
 
+public protocol AttachmentImporting: Sendable {
+    func imagePayload(data: Data, contentType: UTType?) async throws -> AttachmentPayload
+    func filePayload(at url: URL) async throws -> AttachmentPayload
+}
+
 public actor AttachmentImportService {
     public init() {}
 
-    public func imagePayload(data: Data, contentType: UTType?) throws -> AttachmentPayload {
+    public func imagePayload(data: Data, contentType: UTType?) async throws -> AttachmentPayload {
         let type = contentType ?? .jpeg
         let mimeType = type.preferredMIMEType ?? "image/jpeg"
         let fileExtension = type.preferredFilenameExtension ?? "jpg"
@@ -15,7 +20,7 @@ public actor AttachmentImportService {
         )
     }
 
-    public func filePayload(at url: URL) throws -> AttachmentPayload {
+    public func filePayload(at url: URL) async throws -> AttachmentPayload {
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
 
@@ -44,3 +49,5 @@ public actor AttachmentImportService {
         )
     }
 }
+
+extension AttachmentImportService: AttachmentImporting {}

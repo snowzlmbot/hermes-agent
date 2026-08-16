@@ -79,11 +79,18 @@ struct ConversationView: View {
                 .onChange(of: selectedPhoto) { _, item in
                     guard let item else { return }
                     Task {
-                        if let data = try? await item.loadTransferable(type: Data.self) {
+                        do {
+                            guard let data = try await item.loadTransferable(type: Data.self) else {
+                                appModel.reportAttachmentImportError()
+                                selectedPhoto = nil
+                                return
+                            }
                             await appModel.attachPhoto(
                                 data: data,
                                 contentType: item.supportedContentTypes.first
                             )
+                        } catch {
+                            appModel.reportAttachmentImportError()
                         }
                         selectedPhoto = nil
                     }
@@ -93,14 +100,39 @@ struct ConversationView: View {
                     allowedContentTypes: [.item],
                     allowsMultipleSelection: false
                 ) { result in
-                    guard case .success(let urls) = result, let url = urls.first else { return }
-                    Task { await appModel.attachFile(url: url) }
+                    switch result {
+                    case .success(let urls):
+                        guard let url = urls.first else {
+                            appModel.reportAttachmentImportError()
+                            return
+                        }
+                        Task { await appModel.attachFile(url: url) }
+                    case .failure(let error):
+                        let nsError = error as NSError
+                        if nsError.domain != NSCocoaErrorDomain || nsError.code != CocoaError.Code.userCancelled.rawValue {
+                            appModel.reportAttachmentImportError()
+                        }
+                    }
                 }
                 .sheet(isPresented: $showingModelControls) {
                     ModelControlsSheet(chat: chat)
                 }
                 .sheet(isPresented: $showingSettings) {
                     ConnectionSummarySheet(profile: appModel.profile)
+                }
+                .alert(
+                    String(localized: "error.title"),
+                    isPresented: Binding(
+                        get: { audioModel.errorMessage != nil },
+                        set: { if !$0 { audioModel.clearError() } }
+                    ),
+                    presenting: audioModel.errorMessage
+                ) { _ in
+                    Button(String(localized: "action.dismiss"), role: .cancel) {
+                        audioModel.clearError()
+                    }
+                } message: { message in
+                    Text(message)
                 }
                 .task {
                     if chat.state.messages.isEmpty { try? await chat.loadSessions() }
@@ -135,7 +167,11 @@ struct ConversationView: View {
 
     private func toggleRecording() {
         if audioModel.isRecording {
-            guard let client = appModel.gatewayRESTClient else { return }
+            guard let client = appModel.gatewayRESTClient else {
+                audioModel.cancelRecording()
+                audioModel.showTranscriptionError()
+                return
+            }
             Task {
                 if let text = await audioModel.stopAndTranscribe(using: client) {
                     composerText = composerText.isEmpty ? text : "\(composerText) \(text)"
@@ -147,7 +183,10 @@ struct ConversationView: View {
     }
 
     private func speak(_ text: String) {
-        guard let client = appModel.gatewayRESTClient else { return }
+        guard let client = appModel.gatewayRESTClient else {
+            audioModel.showPlaybackError()
+            return
+        }
         Task { await audioModel.speak(text, using: client) }
     }
 }

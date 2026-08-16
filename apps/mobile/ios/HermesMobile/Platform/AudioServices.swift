@@ -10,7 +10,26 @@ public enum AudioServiceError: Error, Equatable, Sendable {
 }
 
 @MainActor
+public protocol AudioRecordingServiceProtocol: AnyObject {
+    func start() async throws
+    func stop() throws -> AudioDataURL
+    func cancel()
+}
+
+@MainActor
+public protocol AudioPlaybackServiceProtocol: AnyObject {
+    func play(_ audio: AudioDataURL) throws -> TimeInterval
+    func stop()
+}
+
+public protocol AudioTranscriptionClient: Sendable {
+    func transcription(dataURL: String, mimeType: String) async throws -> String
+    func speech(text: String) async throws -> AudioDataURL
+}
+
+@MainActor
 public final class AudioRecordingService {
+    public static let maximumDuration: TimeInterval = 60
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
 
@@ -43,7 +62,10 @@ public final class AudioRecordingService {
         ]
         let nextRecorder = try AVAudioRecorder(url: url, settings: settings)
         nextRecorder.prepareToRecord()
-        guard nextRecorder.record() else { throw AudioServiceError.recordingFailed }
+        guard nextRecorder.record(forDuration: Self.maximumDuration) else {
+            try? FileManager.default.removeItem(at: url)
+            throw AudioServiceError.recordingFailed
+        }
         recorder = nextRecorder
         recordingURL = url
     }
@@ -65,6 +87,8 @@ public final class AudioRecordingService {
         recordingURL = nil
     }
 }
+
+extension AudioRecordingService: AudioRecordingServiceProtocol {}
 
 @MainActor
 public final class AudioPlaybackService {
@@ -89,44 +113,71 @@ public final class AudioPlaybackService {
     }
 }
 
+extension AudioPlaybackService: AudioPlaybackServiceProtocol {}
+
 @MainActor
 @Observable
 public final class AudioInteractionModel {
+    public static let maximumRecordingDuration: Duration = .seconds(AudioRecordingService.maximumDuration)
     public private(set) var isRecording = false
     public private(set) var isTranscribing = false
     public private(set) var isSpeaking = false
     public private(set) var errorMessage: String?
 
-    @ObservationIgnored private let recordingService: AudioRecordingService
-    @ObservationIgnored private let playbackService: AudioPlaybackService
+    @ObservationIgnored private let recordingService: any AudioRecordingServiceProtocol
+    @ObservationIgnored private let playbackService: any AudioPlaybackServiceProtocol
+    @ObservationIgnored private let maximumRecordingDuration: Duration
     @ObservationIgnored private var playbackTask: Task<Void, Never>?
+    @ObservationIgnored private var recordingLimitTask: Task<Void, Never>?
 
     public init(
-        recordingService: AudioRecordingService = AudioRecordingService(),
-        playbackService: AudioPlaybackService = AudioPlaybackService()
+        recordingService: any AudioRecordingServiceProtocol = AudioRecordingService(),
+        playbackService: any AudioPlaybackServiceProtocol = AudioPlaybackService(),
+        maximumRecordingDuration: Duration = AudioInteractionModel.maximumRecordingDuration
     ) {
         self.recordingService = recordingService
         self.playbackService = playbackService
+        self.maximumRecordingDuration = maximumRecordingDuration
     }
 
     public func startRecording() async {
+        recordingLimitTask?.cancel()
+        recordingLimitTask = nil
         do {
             errorMessage = nil
             try await recordingService.start()
             isRecording = true
+            let limit = maximumRecordingDuration
+            recordingLimitTask = Task { [weak self] in
+                try? await Task.sleep(for: limit)
+                guard !Task.isCancelled else { return }
+                self?.stopRecordingAtLimit()
+            }
         } catch {
             isRecording = false
-            errorMessage = String(localized: "audio.microphone.error")
+            if let audioError = error as? AudioServiceError, audioError == .microphoneDenied {
+                errorMessage = String(localized: "audio.microphone.error")
+            } else {
+                errorMessage = String(localized: "audio.recording.error")
+            }
         }
     }
 
-    public func stopAndTranscribe(using client: GatewayRESTClient) async -> String? {
+    public func stopAndTranscribe(using client: any AudioTranscriptionClient) async -> String? {
         guard isRecording else { return nil }
+        recordingLimitTask?.cancel()
+        recordingLimitTask = nil
         isRecording = false
+        let audio: AudioDataURL
+        do {
+            audio = try recordingService.stop()
+        } catch {
+            errorMessage = String(localized: "audio.recording.error")
+            return nil
+        }
         isTranscribing = true
         defer { isTranscribing = false }
         do {
-            let audio = try recordingService.stop()
             return try await client.transcription(dataURL: audio.string, mimeType: audio.mimeType)
         } catch {
             errorMessage = String(localized: "audio.transcription.error")
@@ -135,11 +186,13 @@ public final class AudioInteractionModel {
     }
 
     public func cancelRecording() {
+        recordingLimitTask?.cancel()
+        recordingLimitTask = nil
         recordingService.cancel()
         isRecording = false
     }
 
-    public func speak(_ text: String, using client: GatewayRESTClient) async {
+    public func speak(_ text: String, using client: any AudioTranscriptionClient) async {
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanText.isEmpty else { return }
         do {
@@ -164,5 +217,30 @@ public final class AudioInteractionModel {
         playbackTask = nil
         playbackService.stop()
         isSpeaking = false
+    }
+
+    public func showTranscriptionError() {
+        errorMessage = String(localized: "audio.transcription.error")
+    }
+
+    public func showPlaybackError() {
+        errorMessage = String(localized: "audio.playback.error")
+    }
+
+    public func clearError() {
+        errorMessage = nil
+    }
+
+    private func stopRecordingAtLimit() {
+        guard isRecording else { return }
+        recordingLimitTask = nil
+        do {
+            _ = try recordingService.stop()
+            isRecording = false
+            errorMessage = String(localized: "audio.recording.limit")
+        } catch {
+            isRecording = false
+            errorMessage = String(localized: "audio.recording.error")
+        }
     }
 }

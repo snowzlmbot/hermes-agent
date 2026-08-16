@@ -3,7 +3,7 @@ import Foundation
 public struct AppDependencies: Sendable {
     public let profileRepository: GatewayProfileRepository
     public let notificationService: any NotificationScheduling
-    public let attachmentImporter: AttachmentImportService
+    public let attachmentImporter: any AttachmentImporting
     public let socketFactory: HermesGatewayTransport.SocketFactory
     public let urlSession: URLSession
     public let allowsInsecureTransport: Bool
@@ -11,7 +11,7 @@ public struct AppDependencies: Sendable {
     public init(
         profileRepository: GatewayProfileRepository,
         notificationService: any NotificationScheduling,
-        attachmentImporter: AttachmentImportService,
+        attachmentImporter: any AttachmentImporting,
         socketFactory: @escaping HermesGatewayTransport.SocketFactory = { URLSessionGatewaySocket(url: $0) },
         urlSession: URLSession = .shared,
         allowsInsecureTransport: Bool = false

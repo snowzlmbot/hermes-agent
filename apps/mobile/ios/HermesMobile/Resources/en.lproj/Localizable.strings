@@ -99,6 +99,8 @@
 "notification.approval.body" = "A session needs your approval";
 "notification.input.body" = "A session is waiting for input";
 "audio.microphone.error" = "Microphone access is required to record a voice message.";
+"audio.recording.error" = "The voice message could not be recorded.";
+"audio.recording.limit" = "Recording stopped after reaching the one-minute limit.";
 "audio.transcription.error" = "The voice message could not be transcribed.";
 "audio.playback.error" = "The response could not be read aloud.";
 "demo.session.title" = "Welcome";
@@ -122,6 +124,7 @@
 "error.message.send" = "The message could not be sent.";
 "error.message.stop" = "The response could not be stopped.";
 "error.attachment.upload" = "The attachment could not be uploaded.";
+"error.attachment.import" = "The selected photo or file could not be imported.";
 "error.gateway" = "The gateway reported an error.";
 "error.model.options" = "Could not load the available models.";
 "error.model.switch" = "The model could not be changed.";

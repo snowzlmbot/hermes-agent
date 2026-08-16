@@ -396,11 +396,17 @@ public final class AppModel {
 
     public func attachPhoto(data: Data, contentType: UTType?) async {
         guard let chatModel else { return }
+        let payload: AttachmentPayload
         do {
-            let payload = try await dependencies.attachmentImporter.imagePayload(
+            payload = try await dependencies.attachmentImporter.imagePayload(
                 data: data,
                 contentType: contentType
             )
+        } catch {
+            errorMessage = String(localized: "error.attachment.import")
+            return
+        }
+        do {
             try await chatModel.attach(payload)
         } catch {
             errorMessage = String(localized: "error.attachment.upload")
@@ -409,12 +415,22 @@ public final class AppModel {
 
     public func attachFile(url: URL) async {
         guard let chatModel else { return }
+        let payload: AttachmentPayload
         do {
-            let payload = try await dependencies.attachmentImporter.filePayload(at: url)
+            payload = try await dependencies.attachmentImporter.filePayload(at: url)
+        } catch {
+            errorMessage = String(localized: "error.attachment.import")
+            return
+        }
+        do {
             try await chatModel.attach(payload)
         } catch {
             errorMessage = String(localized: "error.attachment.upload")
         }
+    }
+
+    public func reportAttachmentImportError() {
+        errorMessage = String(localized: "error.attachment.import")
     }
 
     public func clearError() {
