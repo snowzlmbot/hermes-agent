@@ -64,7 +64,11 @@ final class GatewayRESTConcurrencyTests: XCTestCase {
         let persistence = PersistenceRecorder()
         let client = GatewayRESTClient(
             endpoint: endpoint,
-            credentials: .oauth(tokens, endpoint: endpoint.baseURL.absoluteString),
+            credentials: .oauth(
+                tokens,
+                endpoint: endpoint.baseURL.absoluteString,
+                profileID: "profile-a"
+            ),
             session: session,
             persistCredentials: { value in await persistence.record(value) }
         )
@@ -82,6 +86,7 @@ final class GatewayRESTConcurrencyTests: XCTestCase {
         let persisted = await persistence.values
         XCTAssertEqual(persisted.count, 1)
         XCTAssertEqual(persisted.first?.endpoint, endpoint.baseURL.absoluteString)
+        XCTAssertEqual(persisted.first?.profileID, "profile-a")
         XCTAssertEqual(persisted.first?.nativeTokens?.accessToken, "new-access")
         XCTAssertEqual(persisted.first?.nativeTokens?.refreshToken, "new-refresh")
     }

@@ -176,7 +176,11 @@ public final class AppModel {
                 authMode: .oauth,
                 allowInsecure: false
             )
-            let credentials = GatewayCredentials.oauth(tokens, endpoint: profile.endpoint)
+            let credentials = GatewayCredentials.oauth(
+                tokens,
+                endpoint: profile.endpoint,
+                profileID: profile.id
+            )
             try await dependencies.profileRepository.save(profile: profile, credentials: credentials)
             try await activate(profile: profile, credentials: credentials)
         } catch NativeOAuthError.cancelled {

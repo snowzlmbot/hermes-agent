@@ -19,6 +19,7 @@ final class ProfileRepositoryTests: XCTestCase {
         XCTAssertEqual(connection?.credentials, secret)
         XCTAssertEqual(storedProfiles, [profile])
         XCTAssertEqual(storedCredentials, secret)
+        XCTAssertNil(storedCredentials?.profileID)
     }
 
     func testSecureOnlyPolicyRejectsSavingCleartextProfile() async throws {
@@ -216,11 +217,127 @@ final class ProfileRepositoryTests: XCTestCase {
             credentialStore: validCredentials
         )
         let secureOAuth = GatewayProfile(endpoint: "https://gateway.example", authMode: .oauth)
-        let secureCredentials = GatewayCredentials.oauth(tokens, endpoint: secureOAuth.endpoint)
+        let secureCredentials = GatewayCredentials.oauth(
+            tokens,
+            endpoint: secureOAuth.endpoint,
+            profileID: secureOAuth.id
+        )
         try await validRepository.save(profile: secureOAuth, credentials: secureCredentials)
         let restored = try await validRepository.load()
         XCTAssertEqual(restored?.profile, secureOAuth)
         XCTAssertEqual(restored?.credentials, secureCredentials)
+    }
+
+    func testLegacyOAuthCredentialsMigrateProfileBindingOnlyWhenEndpointMatches() async throws {
+        let profile = GatewayProfile(
+            id: "profile-a",
+            endpoint: "https://gateway.example:443/",
+            authMode: .oauth
+        )
+        let credentials = InMemoryCredentialStore()
+        let legacy = GatewayCredentials.oauth(
+            oauthTokens(),
+            endpoint: "https://GATEWAY.example"
+        )
+        try await credentials.save(legacy)
+        let repository = GatewayProfileRepository(
+            profileStore: InMemoryGatewayProfileStore(profiles: [profile]),
+            credentialStore: credentials
+        )
+
+        let restored = try await repository.load()
+        let migrated = try await credentials.load()
+
+        XCTAssertEqual(restored?.credentials.profileID, profile.id)
+        XCTAssertEqual(migrated?.profileID, profile.id)
+        XCTAssertEqual(migrated?.endpoint, legacy.endpoint)
+        XCTAssertEqual(migrated?.auth, legacy.auth)
+    }
+
+    func testLegacyOAuthCredentialsFailClosedWithoutMigrationOnEndpointMismatch() async throws {
+        let profile = GatewayProfile(
+            id: "profile-a",
+            endpoint: "https://gateway.example",
+            authMode: .oauth
+        )
+        let credentials = InMemoryCredentialStore()
+        let legacy = GatewayCredentials.oauth(
+            oauthTokens(),
+            endpoint: "https://other.example"
+        )
+        try await credentials.save(legacy)
+        let repository = GatewayProfileRepository(
+            profileStore: InMemoryGatewayProfileStore(profiles: [profile]),
+            credentialStore: credentials
+        )
+
+        do {
+            _ = try await repository.load()
+            XCTFail("Expected OAuth endpoint mismatch")
+        } catch {
+            XCTAssertEqual(error as? CredentialError, .endpointMismatch)
+        }
+
+        let unchanged = try await credentials.load()
+        XCTAssertEqual(unchanged, legacy)
+    }
+
+    func testBoundOAuthCredentialsFailClosedOnProfileMismatch() async throws {
+        let profile = GatewayProfile(
+            id: "profile-a",
+            endpoint: "https://gateway.example",
+            authMode: .oauth
+        )
+        let credentials = InMemoryCredentialStore()
+        let boundToOtherProfile = GatewayCredentials.oauth(
+            oauthTokens(),
+            endpoint: profile.endpoint,
+            profileID: "profile-b"
+        )
+        try await credentials.save(boundToOtherProfile)
+        let repository = GatewayProfileRepository(
+            profileStore: InMemoryGatewayProfileStore(profiles: [profile]),
+            credentialStore: credentials
+        )
+
+        do {
+            _ = try await repository.load()
+            XCTFail("Expected OAuth profile mismatch")
+        } catch {
+            XCTAssertEqual(error as? CredentialError, .profileMismatch)
+        }
+
+        let unchanged = try await credentials.load()
+        XCTAssertEqual(unchanged, boundToOtherProfile)
+    }
+
+    func testOAuthBindingWriteRollsBackWhenProfileSaveFails() async throws {
+        let profile = GatewayProfile(
+            id: "profile-a",
+            endpoint: "https://gateway.example",
+            authMode: .oauth
+        )
+        let previous = try GatewayCredentials(endpoint: profile.endpoint, token: "previous-token")
+        let credentials = RecordingCredentialStore(value: previous)
+        let repository = GatewayProfileRepository(
+            profileStore: FailingSaveGatewayProfileStore(),
+            credentialStore: credentials
+        )
+        let legacy = GatewayCredentials.oauth(oauthTokens(), endpoint: profile.endpoint)
+
+        do {
+            try await repository.save(profile: profile, credentials: legacy)
+            XCTFail("Expected profile persistence failure")
+        } catch {
+            XCTAssertEqual(error as? ProfileStoreTestError, .saveFailed)
+        }
+
+        let writes = await credentials.savedValues
+        XCTAssertEqual(writes.count, 2)
+        XCTAssertEqual(writes.first?.profileID, profile.id)
+        XCTAssertEqual(writes.last, previous)
+        let rolledBack = try await credentials.load()
+        XCTAssertEqual(rolledBack, previous)
     }
 
     @MainActor
@@ -280,6 +397,15 @@ final class ProfileRepositoryTests: XCTestCase {
     }
 }
 
+private func oauthTokens() -> NativeTokenSet {
+    NativeTokenSet(
+        accessToken: "access",
+        refreshToken: "refresh",
+        expiresAt: 4_102_444_800,
+        provider: "provider"
+    )
+}
+
 private actor CountingCredentialStore: CredentialStore {
     private(set) var loadCount = 0
     private(set) var saveCount = 0
@@ -298,6 +424,33 @@ private actor FailingDeleteCredentialStore: CredentialStore {
     func save(_ credentials: GatewayCredentials) async throws { value = credentials }
     func load() async throws -> GatewayCredentials? { value }
     func delete() async throws { throw CredentialError.keychainFailure(OSStatusCode(-1)) }
+}
+
+private enum ProfileStoreTestError: Error, Equatable {
+    case saveFailed
+}
+
+private actor FailingSaveGatewayProfileStore: GatewayProfileStore {
+    func load() async throws -> [GatewayProfile] { [] }
+    func save(_ profile: GatewayProfile) async throws { throw ProfileStoreTestError.saveFailed }
+    func deleteAll() async throws {}
+}
+
+private actor RecordingCredentialStore: CredentialStore {
+    private var value: GatewayCredentials?
+    private(set) var savedValues: [GatewayCredentials] = []
+
+    init(value: GatewayCredentials?) {
+        self.value = value
+    }
+
+    func save(_ credentials: GatewayCredentials) async throws {
+        savedValues.append(credentials)
+        value = credentials
+    }
+
+    func load() async throws -> GatewayCredentials? { value }
+    func delete() async throws { value = nil }
 }
 
 private final class UnexpectedRequestURLProtocol: URLProtocol {

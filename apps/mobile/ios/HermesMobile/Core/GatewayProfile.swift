@@ -183,15 +183,18 @@ public actor GatewayProfileRepository {
         guard let profile = profiles.first else { return nil }
         try validate(profile)
         guard let credentials = try await credentialStore.load() else { return nil }
-        try validate(credentials, for: profile)
-        return StoredGatewayConnection(profile: profile, credentials: credentials)
+        let resolvedCredentials = try validatedCredentials(credentials, for: profile)
+        if resolvedCredentials != credentials {
+            try await credentialStore.save(resolvedCredentials)
+        }
+        return StoredGatewayConnection(profile: profile, credentials: resolvedCredentials)
     }
 
     public func save(profile: GatewayProfile, credentials: GatewayCredentials) async throws {
         try validate(profile)
-        try validate(credentials, for: profile)
+        let resolvedCredentials = try validatedCredentials(credentials, for: profile)
         let previousCredentials = try await credentialStore.load()
-        try await credentialStore.save(credentials)
+        try await credentialStore.save(resolvedCredentials)
         do {
             try await profileStore.save(profile)
         } catch {
@@ -235,13 +238,21 @@ public actor GatewayProfileRepository {
         }
     }
 
-    private func validate(_ credentials: GatewayCredentials, for profile: GatewayProfile) throws {
+    private func validatedCredentials(
+        _ credentials: GatewayCredentials,
+        for profile: GatewayProfile
+    ) throws -> GatewayCredentials {
         switch (profile.authMode, credentials.auth) {
         case (.token, .token(_)):
-            return
+            return credentials
         case (.oauth, .oauth(_)):
             let endpoint = try GatewayEndpoint(rawValue: profile.endpoint)
             try NativeOAuthTransportPolicy.validate(credentials: credentials, endpoint: endpoint)
+            guard let profileID = credentials.profileID else {
+                return credentials.bindingOAuth(to: profile.id)
+            }
+            guard profileID == profile.id else { throw CredentialError.profileMismatch }
+            return credentials
         default:
             throw CredentialError.authModeMismatch
         }

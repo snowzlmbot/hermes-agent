@@ -46,6 +46,7 @@ public enum StoredGatewayAuth: Codable, Equatable, Sendable {
 
 public struct GatewayCredentials: Codable, Equatable, Sendable {
     public let endpoint: String?
+    public let profileID: String?
     public let auth: StoredGatewayAuth
 
     public init(endpoint: String? = nil, token: String) throws {
@@ -56,6 +57,7 @@ public struct GatewayCredentials: Codable, Equatable, Sendable {
             throw CredentialError.emptyToken
         }
         self.endpoint = endpoint
+        self.profileID = nil
         self.auth = .token(token)
     }
 
@@ -65,19 +67,30 @@ public struct GatewayCredentials: Codable, Equatable, Sendable {
         }
         guard !auth.isUsable else {
             self.endpoint = endpoint
+            self.profileID = nil
             self.auth = auth
             return
         }
         throw CredentialError.emptyToken
     }
 
-    public static func oauth(_ tokens: NativeTokenSet, endpoint: String? = nil) -> Self {
-        Self(endpoint: endpoint, auth: .oauth(tokens), unchecked: ())
+    public static func oauth(
+        _ tokens: NativeTokenSet,
+        endpoint: String? = nil,
+        profileID: String? = nil
+    ) -> Self {
+        Self(endpoint: endpoint, profileID: profileID, auth: .oauth(tokens), unchecked: ())
     }
 
-    private init(endpoint: String?, auth: StoredGatewayAuth, unchecked: Void) {
+    private init(endpoint: String?, profileID: String?, auth: StoredGatewayAuth, unchecked: Void) {
         self.endpoint = endpoint
+        self.profileID = profileID
         self.auth = auth
+    }
+
+    func bindingOAuth(to profileID: String) -> Self {
+        guard case .oauth = auth else { return self }
+        return Self(endpoint: endpoint, profileID: profileID, auth: auth, unchecked: ())
     }
 
     public var token: String? {
@@ -105,6 +118,7 @@ public enum CredentialError: Error, Equatable, Sendable {
     case invalidEndpoint
     case authModeMismatch
     case endpointMismatch
+    case profileMismatch
     case keychainFailure(OSStatusCode)
 }
 

@@ -259,6 +259,7 @@ public actor GatewayRESTClient {
         let endpoint = self.endpoint
         let session = self.session
         let storedEndpoint = credentials.endpoint
+        let storedProfileID = credentials.profileID
         let persistCredentials = self.persistCredentials
         let task = Task<GatewayCredentials, Error> {
             try await Self.rotateOAuth(
@@ -266,6 +267,7 @@ public actor GatewayRESTClient {
                 endpoint: endpoint,
                 session: session,
                 storedEndpoint: storedEndpoint,
+                storedProfileID: storedProfileID,
                 persist: persistCredentials
             )
         }
@@ -279,6 +281,7 @@ public actor GatewayRESTClient {
         endpoint: GatewayEndpoint,
         session: URLSession,
         storedEndpoint: String?,
+        storedProfileID: String?,
         persist: @escaping @Sendable (GatewayCredentials) async throws -> Void
     ) async throws -> GatewayCredentials {
         try NativeOAuthTransportPolicy.validate(endpoint: endpoint)
@@ -309,7 +312,11 @@ public actor GatewayRESTClient {
             provider: responseTokens.provider.isEmpty ? tokens.provider : responseTokens.provider,
             userID: responseTokens.userID.isEmpty ? tokens.userID : responseTokens.userID
         )
-        let updatedCredentials = GatewayCredentials.oauth(refreshed, endpoint: storedEndpoint)
+        let updatedCredentials = GatewayCredentials.oauth(
+            refreshed,
+            endpoint: storedEndpoint,
+            profileID: storedProfileID
+        )
         try await persist(updatedCredentials)
         return updatedCredentials
     }
