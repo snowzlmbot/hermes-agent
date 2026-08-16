@@ -145,10 +145,10 @@ def _wait_ready(process: subprocess.Popen[bytes], base_url: str, log_path: Path)
     raise AssertionError(f"official hermes serve did not become ready ({last_error}): {output}")
 
 
-def _assert_websocket_upgrade(host: str, port: int, ticket: str) -> None:
+def _assert_websocket_upgrade(host: str, port: int, token: str) -> None:
     websocket_key = base64.b64encode(secrets.token_bytes(16)).decode("ascii")
     request = (
-        f"GET /api/ws?ticket={ticket} HTTP/1.1\r\n"
+        f"GET /api/ws?token={token} HTTP/1.1\r\n"
         f"Host: {host}:{port}\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
@@ -245,16 +245,7 @@ def test_pinned_official_gateway_supports_loopback_session_http_and_websocket() 
 
             unauthorized_status, _ = _json_request(f"{base_url}/api/sessions")
             assert unauthorized_status == 401
-            ticket_status, ticket_payload = _json_request(
-                f"{base_url}/api/auth/ws-ticket",
-                token=token,
-                method="POST",
-                body={},
-            )
-            assert ticket_status == 200, ticket_payload
-            ticket = ticket_payload.get("ticket")
-            assert isinstance(ticket, str) and ticket
-            _assert_websocket_upgrade("127.0.0.1", port, ticket)
+            _assert_websocket_upgrade("127.0.0.1", port, token)
         finally:
             if process.poll() is None:
                 process.terminate()
