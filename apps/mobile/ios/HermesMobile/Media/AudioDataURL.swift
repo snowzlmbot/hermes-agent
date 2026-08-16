@@ -70,6 +70,9 @@ public enum AudioRequestBuilder {
         auth: StoredGatewayAuth,
         body: [String: Any]
     ) throws -> URLRequest {
+        if case .oauth = auth {
+            try endpoint.requireSecureNativeOAuthTransport()
+        }
         var request = URLRequest(url: endpoint.apiURL(path))
         request.httpMethod = "POST"
         request.timeoutInterval = 120

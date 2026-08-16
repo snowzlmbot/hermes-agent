@@ -55,10 +55,7 @@ public struct NativeAuthorizationRequest: Equatable, Sendable {
         challenge: String,
         state: String
     ) throws {
-        let scheme = endpoint.baseURL.scheme?.lowercased()
-        let host = endpoint.baseURL.host?.lowercased()
-        let secure = scheme == "https" || (scheme == "http" && host.map(GatewayEndpoint.loopbackHosts.contains) == true)
-        guard secure else { throw NativeOAuthError.insecureTransport }
+        try endpoint.requireSecureNativeOAuthTransport()
         guard !state.isEmpty, (43 ... 128).contains(verifier.count), !challenge.isEmpty else {
             throw NativeOAuthError.invalidRequest
         }
@@ -168,6 +165,12 @@ public final class NativeAuthenticationSession: NSObject, ASWebAuthenticationPre
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         let windows = scenes.flatMap(\.windows)
         return windows.first(where: \.isKeyWindow) ?? windows.first ?? ASPresentationAnchor()
+    }
+}
+
+extension GatewayEndpoint {
+    func requireSecureNativeOAuthTransport() throws {
+        guard isSecureTransport else { throw NativeOAuthError.insecureTransport }
     }
 }
 

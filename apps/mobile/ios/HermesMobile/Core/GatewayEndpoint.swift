@@ -22,11 +22,22 @@ public enum GatewayAuth: Sendable {
         case .ticket, .ticketProvider: return nil
         }
     }
+
+    var requiresSecureTransport: Bool {
+        switch self {
+        case .oauth, .ticketProvider: return true
+        case .token, .ticket: return false
+        }
+    }
 }
 
 public struct GatewayEndpoint: Equatable, Hashable, Sendable, Codable {
     public let baseURL: URL
     public let redactedDescription: String
+
+    public var isSecureTransport: Bool {
+        baseURL.scheme?.lowercased() == "https"
+    }
 
     public init(rawValue: String, allowInsecureRemote: Bool = false) throws {
         let raw = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)

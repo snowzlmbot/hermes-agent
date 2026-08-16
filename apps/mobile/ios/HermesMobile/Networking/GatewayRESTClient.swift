@@ -75,6 +75,7 @@ public actor GatewayRESTClient {
         endpoint: GatewayEndpoint,
         session: URLSession = .shared
     ) async throws -> [NativeOAuthProvider] {
+        try endpoint.requireSecureNativeOAuthTransport()
         var request = URLRequest(url: endpoint.apiURL("api/auth/providers"))
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, response) = try await session.data(for: request)
@@ -184,6 +185,9 @@ public actor GatewayRESTClient {
         makeRequest: (StoredGatewayAuth) throws -> URLRequest
     ) async throws -> Data {
         guard !isInvalidated else { throw GatewayRESTError.expiredSession }
+        if case .oauth = credentials.auth {
+            try endpoint.requireSecureNativeOAuthTransport()
+        }
         try await refreshOAuthIfNeeded()
         guard !isInvalidated else { throw GatewayRESTError.expiredSession }
         let attemptedAuth = credentials.auth
@@ -264,6 +268,7 @@ public actor GatewayRESTClient {
         storedEndpoint: String?,
         persist: @escaping @Sendable (GatewayCredentials) async throws -> Void
     ) async throws -> GatewayCredentials {
+        try endpoint.requireSecureNativeOAuthTransport()
         var request = URLRequest(url: endpoint.apiURL("auth/native/refresh"))
         request.httpMethod = "POST"
         request.timeoutInterval = 30

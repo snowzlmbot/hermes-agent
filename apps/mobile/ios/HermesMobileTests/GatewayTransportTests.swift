@@ -65,6 +65,28 @@ final class GatewayTransportTests: XCTestCase {
         XCTAssertEqual(ticketCount, 1)
     }
 
+    func testOAuthTicketProviderRejectsCleartextLoopbackBeforeMintingOrDialing() async throws {
+        let socket = TestSocket()
+        let sockets = SocketQueue([socket])
+        let source = TicketRecorder()
+        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        let transport = HermesGatewayTransport(
+            endpoint: endpoint,
+            auth: .ticketProvider { await source.next() },
+            socketFactory: { _ in sockets.next() }
+        )
+
+        do {
+            try await transport.connect()
+            XCTFail("Expected OAuth-derived ticket transport to reject cleartext WebSocket")
+        } catch {
+            XCTAssertEqual(error as? GatewayTransportError, .insecureTransport)
+        }
+        let ticketCount = await source.count
+        XCTAssertEqual(ticketCount, 0)
+        XCTAssertEqual(sockets.createdCount, 0)
+    }
+
     func testTicketProviderMintsFreshTicketForEveryConnection() async throws {
         let socket = TestSocket()
         let endpoint = try GatewayEndpoint(rawValue: "https://gateway.example.com")
