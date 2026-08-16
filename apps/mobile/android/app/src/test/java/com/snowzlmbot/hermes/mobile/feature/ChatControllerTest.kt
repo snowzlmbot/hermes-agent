@@ -381,6 +381,27 @@ class ChatControllerTest {
   }
 
   @Test
+  fun cancellingCallerCancelsPendingMutationAndReleasesSerialization() = runTest {
+    val runtime = RecordingRuntime().apply { delaySessionMutations = true }
+    val controller = ChatController(runtime, backgroundScope)
+    controller.connect()
+    val first = async { controller.setPinned("stored-1", true) }
+    runCurrent()
+
+    first.cancel()
+    assertTrue(runCatching { first.await() }.exceptionOrNull() is kotlinx.coroutines.CancellationException)
+    runCurrent()
+    assertEquals(1, runtime.cancelledSessionMutations)
+
+    runtime.delaySessionMutations = false
+    controller.setPinned("stored-1", false)
+    assertEquals(
+      listOf("update:stored-1:pinned=true", "update:stored-1:pinned=false"),
+      runtime.sessionMutationCalls,
+    )
+  }
+
+  @Test
   fun closeCancelsPendingMutationAndAllSessionApisAreTerminalNoOps() = runTest {
     val runtime = RecordingRuntime().apply { delaySessionMutations = true }
     val controller = ChatController(runtime, backgroundScope)
