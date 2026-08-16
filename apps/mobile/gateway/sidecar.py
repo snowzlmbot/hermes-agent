@@ -223,6 +223,12 @@ def create_app(
                 await asyncio.gather(*pending, return_exceptions=True)
                 for task in done:
                     task.result()
+        except asyncio.CancelledError:
+            try:
+                await websocket.close(code=1001)
+            except (asyncio.CancelledError, Exception):
+                pass
+            return
         except Exception:
             # Never include the upstream URL in an error: it contains the
             # loopback-only internal token required by official v0.20.1.
