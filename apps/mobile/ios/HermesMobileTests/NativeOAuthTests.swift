@@ -4,93 +4,13 @@ import XCTest
 @testable import HermesMobile
 
 final class NativeOAuthTests: XCTestCase {
-    func testRejectsCleartextOAuthIncludingEveryLoopbackForm() throws {
-        let endpoints = [
-            try GatewayEndpoint(rawValue: "http://agent.example", allowInsecureRemote: true),
-            try GatewayEndpoint(rawValue: "http://127.0.0.1:8765"),
-            try GatewayEndpoint(rawValue: "http://localhost:8765"),
-            try GatewayEndpoint(rawValue: "http://[::1]:8765")
-        ]
-
-        for endpoint in endpoints {
-            XCTAssertThrowsError(try NativeAuthorizationRequest(endpoint: endpoint)) { error in
-                XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
-            }
-        }
-    }
-
-    func testNativeOAuthRESTPathsRejectCleartextLoopback() async throws {
-        let endpoint = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
-        let session = makeFailingSession()
-        let tokens = NativeTokenSet(
-            accessToken: "access",
-            refreshToken: "refresh",
-            expiresAt: 4_102_444_800,
-            provider: "nous"
-        )
-
-        XCTAssertThrowsError(
-            try GatewayRESTRequestBuilder.nativeTokenRequest(
-                endpoint: endpoint,
-                code: "code",
-                verifier: String(repeating: "v", count: 43)
-            )
-        ) { error in
+    func testRejectsRemoteCleartextOAuthButAllowsLoopback() throws {
+        let remote = try GatewayEndpoint(rawValue: "http://agent.example", allowInsecureRemote: true)
+        XCTAssertThrowsError(try NativeAuthorizationRequest(endpoint: remote)) { error in
             XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
         }
-
-        let oauth = StoredGatewayAuth.oauth(tokens)
-        XCTAssertThrowsError(
-            try GatewayRESTRequestBuilder.patchSessionRequest(
-                endpoint: endpoint,
-                auth: oauth,
-                storedID: "stored-1",
-                title: "Title",
-                archived: nil
-            )
-        ) { error in
-            XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
-        }
-        XCTAssertThrowsError(
-            try AudioRequestBuilder.speechRequest(
-                endpoint: endpoint,
-                auth: oauth,
-                text: "Read this"
-            )
-        ) { error in
-            XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
-        }
-
-        do {
-            _ = try await GatewayRESTClient.nativeOAuthProviders(endpoint: endpoint, session: session)
-            XCTFail("Expected provider discovery to reject cleartext OAuth")
-        } catch {
-            XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
-        }
-
-        do {
-            _ = try await GatewayRESTClient.exchangeNativeCode(
-                endpoint: endpoint,
-                code: "code",
-                verifier: String(repeating: "v", count: 43),
-                session: session
-            )
-            XCTFail("Expected token exchange to reject cleartext OAuth")
-        } catch {
-            XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
-        }
-
-        let client = GatewayRESTClient(
-            endpoint: endpoint,
-            credentials: .oauth(tokens, endpoint: endpoint.baseURL.absoluteString),
-            session: session
-        )
-        do {
-            _ = try await client.freshWebSocketTicket()
-            XCTFail("Expected OAuth ticket minting to reject cleartext HTTP")
-        } catch {
-            XCTAssertEqual(error as? NativeOAuthError, .insecureTransport)
-        }
+        let loopback = try GatewayEndpoint(rawValue: "http://127.0.0.1:8765")
+        XCTAssertNoThrow(try NativeAuthorizationRequest(endpoint: loopback))
     }
 
     func testAuthorizationURLUsesRegisteredCallbackAndPKCE() throws {
@@ -190,29 +110,4 @@ final class NativeOAuthTests: XCTestCase {
 
         XCTAssertEqual(providers, [NativeOAuthProvider(name: "nous", displayName: "Nous Research")])
     }
-
-    private func makeFailingSession() -> URLSession {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [NativeOAuthFailingURLProtocol.self]
-        return URLSession(configuration: configuration)
-    }
-}
-
-private final class NativeOAuthFailingURLProtocol: URLProtocol, @unchecked Sendable {
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    override func startLoading() {
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: 500,
-            httpVersion: nil,
-            headerFields: nil
-        )!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data())
-        client?.urlProtocolDidFinishLoading(self)
-    }
-
-    override func stopLoading() {}
 }

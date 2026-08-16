@@ -6,7 +6,6 @@ public enum GatewayTransportError: Error, Equatable, Sendable {
     case invalidFrame
     case rpc(JSONRPCError)
     case authenticationUnavailable
-    case insecureTransport
     case reconnectExhausted
 }
 
@@ -105,9 +104,6 @@ public actor HermesGatewayTransport {
     public func connect() async throws {
         intentionallyDisconnected = false
         guard socket == nil else { return }
-        guard !auth.requiresSecureTransport || endpoint.isSecureTransport else {
-            throw GatewayTransportError.insecureTransport
-        }
 
         let attempt: ConnectionAttempt
         if let current = connectionAttempt {

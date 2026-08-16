@@ -11,7 +11,6 @@ public enum GatewayRESTRequestBuilder {
         code: String,
         verifier: String
     ) throws -> URLRequest {
-        try endpoint.requireSecureNativeOAuthTransport()
         guard !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !verifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw GatewayRESTRequestError.emptyBody
@@ -81,9 +80,6 @@ public enum GatewayRESTRequestBuilder {
         auth: StoredGatewayAuth,
         body: [String: Any]
     ) throws -> URLRequest {
-        if case .oauth = auth {
-            try endpoint.requireSecureNativeOAuthTransport()
-        }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 120
