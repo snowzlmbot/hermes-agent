@@ -150,11 +150,14 @@ def verify_archive(raw_path: str | Path) -> tuple[Path, Path]:
         )
     if properties.get("CFBundleIdentifier") != EXPECTED_BUNDLE_ID:
         raise ArchiveVerificationError("xcarchive bundle identifier is incorrect")
-    for key in ("SigningIdentity", "Team", "ProvisionedDevices"):
-        if key in properties:
+    for key in ("SigningIdentity", "Team"):
+        value = properties.get(key)
+        if value not in (None, "", "-"):
             raise ArchiveVerificationError(
-                f"xcarchive must be unsigned: ApplicationProperties contains {key}"
+                f"xcarchive must be unsigned: {key}={value!r}"
             )
+    if properties.get("ProvisionedDevices"):
+        raise ArchiveVerificationError("xcarchive must not contain ProvisionedDevices")
 
     products = archive / "Products"
     app = products / Path(*EXPECTED_APPLICATION_PATH.parts)

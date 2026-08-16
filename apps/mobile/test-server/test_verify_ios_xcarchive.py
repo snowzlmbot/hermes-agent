@@ -46,6 +46,11 @@ class IOSXCArchiveVerifierTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("device iOS", result.stderr)
 
+    def test_accepts_unsigned_placeholder_metadata(self) -> None:
+        self._write_archive_info(SigningIdentity="-", Team="")
+        result = self._verify()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_rejects_signing_and_provisioning_metadata(self) -> None:
         for key, value in (
             ("SigningIdentity", "Apple Development"),
