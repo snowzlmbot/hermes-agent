@@ -178,7 +178,15 @@ struct ConversationView: View {
                 }
             }
         } else {
-            Task { await audioModel.startRecording() }
+            guard let client = appModel.gatewayRESTClient else {
+                audioModel.showTranscriptionError()
+                return
+            }
+            Task {
+                await audioModel.startRecording(using: client) { text in
+                    composerText = composerText.isEmpty ? text : "\(composerText) \(text)"
+                }
+            }
         }
     }
 

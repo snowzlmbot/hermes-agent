@@ -11,7 +11,7 @@ final class AudioInteractionModelTests: XCTestCase {
             playbackService: FakePlaybackService()
         )
 
-        await model.startRecording()
+        await model.startRecording(using: FakeAudioClient()) { _ in }
 
         XCTAssertFalse(model.isRecording)
         XCTAssertEqual(model.errorMessage, String(localized: "audio.microphone.error"))
@@ -24,7 +24,7 @@ final class AudioInteractionModelTests: XCTestCase {
             playbackService: FakePlaybackService()
         )
 
-        await model.startRecording()
+        await model.startRecording(using: FakeAudioClient()) { _ in }
 
         XCTAssertFalse(model.isRecording)
         XCTAssertEqual(model.errorMessage, String(localized: "audio.recording.error"))
@@ -37,7 +37,7 @@ final class AudioInteractionModelTests: XCTestCase {
             recordingService: recorder,
             playbackService: FakePlaybackService()
         )
-        await model.startRecording()
+        await model.startRecording(using: FakeAudioClient()) { _ in }
 
         let transcript = await model.stopAndTranscribe(using: client)
 
@@ -54,7 +54,7 @@ final class AudioInteractionModelTests: XCTestCase {
             recordingService: recorder,
             playbackService: FakePlaybackService()
         )
-        await model.startRecording()
+        await model.startRecording(using: FakeAudioClient()) { _ in }
 
         let transcript = await model.stopAndTranscribe(using: client)
         let transcriptionCallCount = await client.transcriptionCallCount
@@ -90,11 +90,15 @@ final class AudioInteractionModelTests: XCTestCase {
             maximumRecordingDuration: .milliseconds(10)
         )
 
-        await model.startRecording()
+        var automaticTranscript: String?
+        await model.startRecording(using: FakeAudioClient(transcript: "limit transcript")) { text in
+            automaticTranscript = text
+        }
         try await Task.sleep(for: .milliseconds(50))
 
         XCTAssertFalse(model.isRecording)
         XCTAssertEqual(recorder.stopCallCount, 1)
+        XCTAssertEqual(automaticTranscript, "limit transcript")
         XCTAssertEqual(model.errorMessage, String(localized: "audio.recording.limit"))
     }
 
@@ -104,7 +108,7 @@ final class AudioInteractionModelTests: XCTestCase {
         let client = FakeAudioClient(transcript: "hello")
         let model = AudioInteractionModel(recordingService: recorder, playbackService: player)
 
-        await model.startRecording()
+        await model.startRecording(using: FakeAudioClient()) { _ in }
         let transcript = await model.stopAndTranscribe(using: client)
         await model.speak("Reply", using: client)
 

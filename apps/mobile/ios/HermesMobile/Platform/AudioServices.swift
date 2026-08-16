@@ -140,7 +140,10 @@ public final class AudioInteractionModel {
         self.maximumRecordingDuration = maximumRecordingDuration
     }
 
-    public func startRecording() async {
+    public func startRecording(
+        using client: any AudioTranscriptionClient,
+        onTranscript: @escaping @MainActor @Sendable (String) -> Void
+    ) async {
         recordingLimitTask?.cancel()
         recordingLimitTask = nil
         do {
@@ -151,7 +154,7 @@ public final class AudioInteractionModel {
             recordingLimitTask = Task { [weak self] in
                 try? await Task.sleep(for: limit)
                 guard !Task.isCancelled else { return }
-                self?.stopRecordingAtLimit()
+                await self?.stopRecordingAtLimit(using: client, onTranscript: onTranscript)
             }
         } catch {
             isRecording = false
@@ -231,16 +234,15 @@ public final class AudioInteractionModel {
         errorMessage = nil
     }
 
-    private func stopRecordingAtLimit() {
+    private func stopRecordingAtLimit(
+        using client: any AudioTranscriptionClient,
+        onTranscript: @escaping @MainActor @Sendable (String) -> Void
+    ) async {
         guard isRecording else { return }
         recordingLimitTask = nil
-        do {
-            _ = try recordingService.stop()
-            isRecording = false
+        if let transcript = await stopAndTranscribe(using: client) {
             errorMessage = String(localized: "audio.recording.limit")
-        } catch {
-            isRecording = false
-            errorMessage = String(localized: "audio.recording.error")
+            onTranscript(transcript)
         }
     }
 }
