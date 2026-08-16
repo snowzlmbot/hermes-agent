@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DrawerValue
@@ -81,6 +82,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.core.content.ContextCompat
@@ -120,7 +122,7 @@ internal fun HermesRoot(viewModel: HermesAppViewModel) {
 @Composable
 private fun LoadingScreen() {
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-    Text("Connecting to Hermes", style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.loading_connecting), style = MaterialTheme.typography.titleMedium)
   }
 }
 
@@ -140,7 +142,7 @@ private fun OnboardingScreen(state: AppUiState, viewModel: HermesAppViewModel) {
       verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
       Text("Hermes", style = MaterialTheme.typography.displaySmall)
-      Text("Connect to a gateway", style = MaterialTheme.typography.headlineSmall)
+      Text(stringResource(R.string.onboarding_connect_title), style = MaterialTheme.typography.headlineSmall)
       Text(
         stringResource(R.string.connection_guidance),
         style = MaterialTheme.typography.bodyMedium,
@@ -148,7 +150,7 @@ private fun OnboardingScreen(state: AppUiState, viewModel: HermesAppViewModel) {
       OutlinedTextField(
         value = address,
         onValueChange = { address = it },
-        label = { Text("Gateway address") },
+        label = { Text(stringResource(R.string.gateway_address_label)) },
         singleLine = true,
         modifier = Modifier.fillMaxWidth().testTag("gateway-address"),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
@@ -156,7 +158,7 @@ private fun OnboardingScreen(state: AppUiState, viewModel: HermesAppViewModel) {
       OutlinedTextField(
         value = token,
         onValueChange = { token = it },
-        label = { Text("Session token") },
+        label = { Text(stringResource(R.string.session_token_label)) },
         singleLine = true,
         visualTransformation = PasswordVisualTransformation(),
         modifier = Modifier.fillMaxWidth().testTag("gateway-token"),
@@ -165,7 +167,7 @@ private fun OnboardingScreen(state: AppUiState, viewModel: HermesAppViewModel) {
         Row(verticalAlignment = Alignment.CenterVertically) {
           androidx.compose.material3.Switch(checked = allowInsecure, onCheckedChange = { allowInsecure = it })
           Spacer(Modifier.width(8.dp))
-          Text("Allow cleartext for this gateway")
+          Text(stringResource(R.string.allow_cleartext_gateway))
         }
       }
       state.configurationError?.let {
@@ -182,7 +184,7 @@ private fun OnboardingScreen(state: AppUiState, viewModel: HermesAppViewModel) {
       ) {
         Icon(Icons.Default.Wifi, contentDescription = null)
         Spacer(Modifier.width(8.dp))
-        Text("Connect")
+        Text(stringResource(R.string.action_connect))
       }
       NativeOAuthSection(
         state = state,
@@ -303,10 +305,12 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
         TopAppBar(
           title = {
             Column {
-              val title = mobile?.sessions
-                ?.firstOrNull { it.storedId == chat?.storedSessionId }
-                ?.displayTitle
-                ?: "New conversation"
+              val selectedSession = mobile?.sessions?.firstOrNull { it.storedId == chat?.storedSessionId }
+              val title = if (selectedSession == null) {
+                stringResource(R.string.chat_new_conversation)
+              } else {
+                localizedSessionTitle(selectedSession)
+              }
               Text(title)
               val model = chat?.model?.takeIf(String::isNotBlank)
               if (model != null) Text(model, style = MaterialTheme.typography.labelSmall)
@@ -314,18 +318,18 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
           },
           navigationIcon = {
             IconButton(onClick = { scope.launch { drawerState.open() } }) {
-              Icon(Icons.Default.Menu, contentDescription = "Sessions")
+              Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.sessions_title))
             }
           },
           actions = {
             IconButton(onClick = viewModel::reconnect) {
               Icon(
                 if (chat?.streaming == true) Icons.Default.Wifi else Icons.Default.WifiOff,
-                contentDescription = "Reconnect",
+                contentDescription = stringResource(R.string.reconnect_content_description),
               )
             }
             IconButton(onClick = { showSettings = true }) {
-              Icon(Icons.Default.Settings, contentDescription = "Connection settings")
+              Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.connection_settings_title))
             }
           },
         )
@@ -334,7 +338,7 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
     ) { padding ->
       if (chat == null) {
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-          Text("Preparing a conversation")
+          Text(stringResource(R.string.conversation_preparing))
         }
       } else {
         ChatContent(
@@ -381,20 +385,20 @@ private fun ChatScreen(state: AppUiState, viewModel: HermesAppViewModel) {
   if (showSettings) {
     AlertDialog(
       onDismissRequest = { showSettings = false },
-      title = { Text("Connection settings") },
-      text = { Text("Remove the saved gateway profile and encrypted credential from this device.") },
+      title = { Text(stringResource(R.string.connection_settings_title)) },
+      text = { Text(stringResource(R.string.settings_forget_description)) },
       confirmButton = {
         Button(onClick = { showSettings = false; viewModel.forgetConnection() }) {
-          Text("Forget connection")
+          Text(stringResource(R.string.settings_forget_action))
         }
       },
-      dismissButton = { TextButton(onClick = { showSettings = false }) { Text("Cancel") } },
+      dismissButton = { TextButton(onClick = { showSettings = false }) { Text(stringResource(R.string.action_cancel)) } },
     )
   }
 }
 
 @Composable
-private fun SessionDrawer(
+internal fun SessionDrawer(
   sessions: List<SessionSummary>,
   onNew: () -> Unit,
   onOpen: (String) -> Unit,
@@ -405,6 +409,7 @@ private fun SessionDrawer(
   onDelete: (String) -> Unit,
 ) {
   var menuId by remember { mutableStateOf<String?>(null) }
+  var pendingDelete by remember { mutableStateOf<SessionSummary?>(null) }
   var query by remember { mutableStateOf("") }
   var view by remember { mutableStateOf(SessionLibraryView.ACTIVE) }
   val visible = SessionLibrary.filter(sessions, view, query)
@@ -414,31 +419,33 @@ private fun SessionDrawer(
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-      Text("Sessions", style = MaterialTheme.typography.titleLarge)
-      IconButton(onClick = onNew) { Icon(Icons.Default.Add, contentDescription = "New session") }
+      Text(stringResource(R.string.sessions_title), style = MaterialTheme.typography.titleLarge)
+      IconButton(onClick = onNew) {
+        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.session_new_content_description))
+      }
     }
     OutlinedTextField(
       value = query,
       onValueChange = { query = it },
       modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("session-search"),
       singleLine = true,
-      leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search sessions") },
+      leadingIcon = { Icon(Icons.Default.Search, contentDescription = stringResource(R.string.session_search)) },
       trailingIcon = {
-        if (query.isNotEmpty()) TextButton(onClick = { query = "" }) { Text("Clear") }
+        if (query.isNotEmpty()) TextButton(onClick = { query = "" }) { Text(stringResource(R.string.action_clear)) }
       },
-      placeholder = { Text("Search sessions") },
+      placeholder = { Text(stringResource(R.string.session_search)) },
     )
     Row(
       Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
       horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-      SessionViewButton("Active", view == SessionLibraryView.ACTIVE) { view = SessionLibraryView.ACTIVE }
-      SessionViewButton("Archived", view == SessionLibraryView.ARCHIVED) { view = SessionLibraryView.ARCHIVED }
+      SessionViewButton(stringResource(R.string.session_view_active), view == SessionLibraryView.ACTIVE) { view = SessionLibraryView.ACTIVE }
+      SessionViewButton(stringResource(R.string.session_view_archived), view == SessionLibraryView.ARCHIVED) { view = SessionLibraryView.ARCHIVED }
     }
     HorizontalDivider()
     if (visible.isEmpty()) {
       Text(
-        if (query.trim().isEmpty()) "No sessions in this view" else "No matching sessions",
+        stringResource(if (query.trim().isEmpty()) R.string.session_empty_view else R.string.session_empty_search),
         Modifier.padding(20.dp),
         style = MaterialTheme.typography.bodyMedium,
       )
@@ -456,38 +463,84 @@ private fun SessionDrawer(
         ) {
           Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-              Text(session.displayTitle, maxLines = 1, modifier = Modifier.weight(1f))
-              if (session.pinned) Icon(Icons.Default.PushPin, contentDescription = "Pinned")
+              Text(
+                localizedSessionTitle(session),
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+              )
+              if (session.pinned) {
+                Icon(Icons.Default.PushPin, contentDescription = stringResource(R.string.session_pinned_content_description))
+              }
             }
             Text(session.preview, maxLines = 1, style = MaterialTheme.typography.labelSmall)
           }
         }
         Box {
           IconButton(onClick = { menuId = session.storedId }) {
-            Icon(Icons.Default.MoreVert, contentDescription = "Session actions")
+            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.session_actions_content_description))
           }
           DropdownMenu(expanded = menuId == session.storedId, onDismissRequest = { menuId = null }) {
             if (session.archived) {
               DropdownMenuItem(
-                text = { Text("Restore") },
+                text = { Text(stringResource(R.string.session_action_restore)) },
                 onClick = { menuId = null; onRestore(session.storedId) },
               )
             } else {
               DropdownMenuItem(
-                text = { Text(if (session.pinned) "Unpin" else "Pin") },
+                text = { Text(stringResource(if (session.pinned) R.string.session_action_unpin else R.string.session_action_pin)) },
                 leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) },
                 onClick = { menuId = null; onSetPinned(session.storedId, !session.pinned) },
               )
-              DropdownMenuItem(text = { Text("Rename") }, onClick = { menuId = null; onRename(session.storedId) })
-              DropdownMenuItem(text = { Text("Archive") }, onClick = { menuId = null; onArchive(session.storedId) })
+              DropdownMenuItem(text = { Text(stringResource(R.string.session_action_rename)) }, onClick = { menuId = null; onRename(session.storedId) })
+              DropdownMenuItem(text = { Text(stringResource(R.string.session_action_archive)) }, onClick = { menuId = null; onArchive(session.storedId) })
             }
-            DropdownMenuItem(text = { Text("Delete") }, onClick = { menuId = null; onDelete(session.storedId) })
+            DropdownMenuItem(
+              text = { Text(stringResource(R.string.session_action_delete)) },
+              onClick = { menuId = null; pendingDelete = session },
+            )
           }
         }
       }
     }
   }
+  pendingDelete?.let { session ->
+    AlertDialog(
+      onDismissRequest = { pendingDelete = null },
+      title = { Text(stringResource(R.string.session_delete_title)) },
+      text = {
+        Text(
+          stringResource(
+            R.string.session_delete_message,
+            localizedSessionTitle(session),
+          ),
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = { pendingDelete = null; onDelete(session.storedId) },
+          modifier = Modifier.testTag("confirm-delete-session"),
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+        ) {
+          Text(stringResource(R.string.session_action_delete))
+        }
+      },
+      dismissButton = {
+        TextButton(
+          onClick = { pendingDelete = null },
+          modifier = Modifier.testTag("cancel-delete-session"),
+        ) {
+          Text(stringResource(R.string.action_cancel))
+        }
+      },
+    )
+  }
 }
+}
+
+@Composable
+private fun localizedSessionTitle(session: SessionSummary): String {
+  val fallback = stringResource(R.string.chat_new_conversation)
+  return session.title.ifBlank { session.preview.ifBlank { fallback } }
 }
 
 @Composable
@@ -511,11 +564,12 @@ private fun ChatContent(
   var text by remember { mutableStateOf("") }
   val voice by viewModel.voiceState.collectAsState()
   val context = LocalContext.current
+  val microphonePermissionRequired = stringResource(R.string.error_microphone_permission_required)
   val microphonePermission = rememberLauncherForActivityResult(
     ActivityResultContracts.RequestPermission(),
   ) { granted ->
     if (granted) viewModel.startVoiceRecording()
-    else viewModel.reportVoiceError("Microphone permission is required")
+    else viewModel.reportVoiceError(microphonePermissionRequired)
   }
   val listState = rememberLazyListState()
   LaunchedEffect(chat.messages.size, chat.messages.lastOrNull()?.text) {
@@ -581,10 +635,10 @@ private fun ChatContent(
   if (showAttachmentMenu) {
     AlertDialog(
       onDismissRequest = onDismissAttachmentMenu,
-      title = { Text("Attach to this conversation") },
-      text = { Text("Select an image, PDF, or file. The content is uploaded to the gateway.") },
-      confirmButton = { Button(onClick = onPickAttachment) { Text("Choose file") } },
-      dismissButton = { TextButton(onClick = onDismissAttachmentMenu) { Text("Cancel") } },
+      title = { Text(stringResource(R.string.attachment_dialog_title)) },
+      text = { Text(stringResource(R.string.attachment_dialog_message)) },
+      confirmButton = { Button(onClick = onPickAttachment) { Text(stringResource(R.string.attachment_choose_file)) } },
+      dismissButton = { TextButton(onClick = onDismissAttachmentMenu) { Text(stringResource(R.string.action_cancel)) } },
     )
   }
 }
@@ -646,15 +700,15 @@ private fun ToolCard(tool: ToolState) {
 private fun PromptCards(chat: ChatState, viewModel: HermesAppViewModel) {
   chat.approval?.let { ApprovalCard(it, viewModel) }
   chat.clarify?.let { ClarifyCard(it, viewModel) }
-  chat.secret?.let { SecretCard(it, viewModel) }
-  chat.sudo?.let { SudoCard(it, viewModel) }
+  chat.secret?.let { SecretCard(it, viewModel::respondSecret) }
+  chat.sudo?.let { SudoCard(it, viewModel::respondSudo) }
 }
 
 @Composable
 private fun ApprovalCard(prompt: ApprovalPrompt, viewModel: HermesAppViewModel) {
   Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(MaterialTheme.colorScheme.tertiaryContainer)) {
     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      Text("Approval required", style = MaterialTheme.typography.titleSmall)
+      Text(stringResource(R.string.approval_required), style = MaterialTheme.typography.titleSmall)
       Text(prompt.command)
       prompt.choices.forEach { choice ->
         OutlinedButton(onClick = { viewModel.respondApproval(choice) }, modifier = Modifier.fillMaxWidth()) {
@@ -682,25 +736,55 @@ private fun ClarifyCard(prompt: ClarifyPrompt, viewModel: HermesAppViewModel) {
 }
 
 @Composable
-private fun SecretCard(prompt: SecretPrompt, viewModel: HermesAppViewModel) {
+internal fun SecretCard(prompt: SecretPrompt, onSubmit: (String, String) -> Unit) {
   var value by remember(prompt.requestId) { mutableStateOf("") }
+  val inputLabel = stringResource(R.string.secret_input_label)
   Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(MaterialTheme.colorScheme.errorContainer)) {
     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      Text(prompt.prompt.ifBlank { "Secret required" }, style = MaterialTheme.typography.titleSmall)
-      OutlinedTextField(value, { value = it }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-      Button(onClick = { viewModel.respondSecret(prompt.requestId, value); value = "" }, enabled = value.isNotBlank()) { Text("Send securely") }
+      Text(
+        if (prompt.prompt.isBlank()) stringResource(R.string.secret_required) else prompt.prompt,
+        style = MaterialTheme.typography.titleSmall,
+      )
+      OutlinedTextField(
+        value = value,
+        onValueChange = { value = it },
+        label = { Text(inputLabel) },
+        visualTransformation = PasswordVisualTransformation(),
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("secret-input")
+          .semantics { contentDescription = inputLabel },
+      )
+      Button(onClick = { onSubmit(prompt.requestId, value); value = "" }, enabled = value.isNotBlank()) {
+        Text(stringResource(R.string.secret_send_securely))
+      }
     }
   }
 }
 
 @Composable
-private fun SudoCard(prompt: SudoPrompt, viewModel: HermesAppViewModel) {
+internal fun SudoCard(prompt: SudoPrompt, onSubmit: (String, String) -> Unit) {
   var password by remember(prompt.requestId) { mutableStateOf("") }
+  val inputLabel = stringResource(R.string.sudo_input_label)
   Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(MaterialTheme.colorScheme.errorContainer)) {
     Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      Text(prompt.prompt, style = MaterialTheme.typography.titleSmall)
-      OutlinedTextField(password, { password = it }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-      Button(onClick = { viewModel.respondSudo(prompt.requestId, password); password = "" }, enabled = password.isNotBlank()) { Text("Authenticate") }
+      Text(
+        if (prompt.prompt.isBlank()) stringResource(R.string.sudo_required) else prompt.prompt,
+        style = MaterialTheme.typography.titleSmall,
+      )
+      OutlinedTextField(
+        value = password,
+        onValueChange = { password = it },
+        label = { Text(inputLabel) },
+        visualTransformation = PasswordVisualTransformation(),
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("sudo-input")
+          .semantics { contentDescription = inputLabel },
+      )
+      Button(onClick = { onSubmit(prompt.requestId, password); password = "" }, enabled = password.isNotBlank()) {
+        Text(stringResource(R.string.sudo_authenticate))
+      }
     }
   }
 }
@@ -720,12 +804,16 @@ private fun Composer(
   Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth().navigationBarsPadding()) {
     Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom) {
       Box {
-        IconButton(onClick = onAttach) { Icon(Icons.Default.AttachFile, contentDescription = "Attach") }
+        IconButton(onClick = onAttach) {
+          Icon(Icons.Default.AttachFile, contentDescription = stringResource(R.string.composer_attach))
+        }
       }
       IconButton(onClick = onRecord, enabled = !isTranscribing) {
         Icon(
           Icons.Default.Mic,
-          contentDescription = if (isRecording) "Stop recording" else "Record voice",
+          contentDescription = stringResource(
+            if (isRecording) R.string.composer_stop_recording else R.string.composer_record_voice,
+          ),
           tint = if (isRecording) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
         )
       }
@@ -733,14 +821,20 @@ private fun Composer(
         value = value,
         onValueChange = onValueChange,
         modifier = Modifier.weight(1f).testTag("composer"),
-        placeholder = { Text(if (isTranscribing) "Transcribing voice…" else "Message Hermes") },
+        placeholder = {
+          Text(
+            stringResource(
+              if (isTranscribing) R.string.composer_transcribing_voice else R.string.composer_message_placeholder,
+            ),
+          )
+        },
         maxLines = 5,
       )
       Spacer(Modifier.width(4.dp))
       IconButton(onClick = if (streaming) onStop else onSend, enabled = streaming || value.isNotBlank(), modifier = Modifier.testTag(if (streaming) "stop" else "send")) {
         Icon(
           if (streaming) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send,
-          contentDescription = if (streaming) "Stop" else "Send",
+          contentDescription = stringResource(if (streaming) R.string.action_stop else R.string.action_send),
         )
       }
     }
@@ -752,9 +846,13 @@ private fun RenameDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
   var title by remember { mutableStateOf("") }
   AlertDialog(
     onDismissRequest = onDismiss,
-    title = { Text("Rename session") },
-    text = { OutlinedTextField(title, { title = it }, singleLine = true, label = { Text("Title") }) },
-    confirmButton = { Button(onClick = { onSave(title.trim()) }, enabled = title.isNotBlank()) { Text("Save") } },
-    dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    title = { Text(stringResource(R.string.session_rename_title)) },
+    text = {
+      OutlinedTextField(title, { title = it }, singleLine = true, label = { Text(stringResource(R.string.session_title_label)) })
+    },
+    confirmButton = {
+      Button(onClick = { onSave(title.trim()) }, enabled = title.isNotBlank()) { Text(stringResource(R.string.action_save)) }
+    },
+    dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
   )
 }

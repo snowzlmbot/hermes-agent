@@ -57,6 +57,7 @@ class ChatReducerTest {
     assertEquals("clarify-1", state.clarify?.requestId)
     assertEquals("secret-1", state.secret?.requestId)
     assertEquals("sudo-1", state.sudo?.requestId)
+    assertEquals("", state.sudo?.prompt)
 
     state = ChatReducer.reduce(state, event(GatewayEventType.CLARIFY_EXPIRE, "clarify.expire", """{"request_id":"clarify-1"}"""))
     state = ChatReducer.reduce(state, event(GatewayEventType.SECRET_EXPIRE, "secret.expire", """{"request_id":"secret-1"}"""))

@@ -139,7 +139,7 @@ internal object ChatReducer {
         secret = SecretPrompt(promptId(payload), payload.string("prompt")),
       )
       GatewayEventType.SUDO_REQUEST -> state.copy(
-        sudo = SudoPrompt(promptId(payload), payload.string("prompt").ifBlank { "Authentication required" }),
+        sudo = SudoPrompt(promptId(payload), payload.string("prompt")),
       )
       GatewayEventType.CLARIFY_EXPIRE -> state.copy(clarify = clearPrompt(state.clarify, payload))
       GatewayEventType.SECRET_EXPIRE -> state.copy(secret = clearPrompt(state.secret, payload))
