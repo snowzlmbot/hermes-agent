@@ -427,7 +427,7 @@ async def _exercise_websocket_session_contract(base_url: str, external_token: st
         assert runtime_id and stored_id and runtime_id != stored_id
         titled = await _rpc(first, "title", "session.title", {"session_id": runtime_id, "title": title})
         assert titled.get("title") == title
-        assert titled.get("session_key") == stored_id
+        assert titled.get("pending") is False
         closed = await _rpc(first, "close", "session.close", {"session_id": runtime_id})
         assert closed.get("closed") is True
 
@@ -436,7 +436,8 @@ async def _exercise_websocket_session_contract(base_url: str, external_token: st
         external_token=external_token,
     )
     assert listed_status == 200
-    assert any(row.get("id") == stored_id for row in listed.get("sessions", []))
+    stored_row = next(row for row in listed.get("sessions", []) if row.get("id") == stored_id)
+    assert stored_row.get("title") == title
 
     second_ticket = _mint_ticket(base_url, external_token)
     assert second_ticket != first_ticket
