@@ -9,7 +9,6 @@ import com.snowzlmbot.hermes.mobile.core.ModelOption
 import com.snowzlmbot.hermes.mobile.core.ModelProviderOption
 import com.snowzlmbot.hermes.mobile.core.SessionSummary
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -334,77 +333,6 @@ class ChatControllerTest {
     assertNotNull(controller.state.value.error)
   }
 
-  @Test
-  fun failedActiveDeleteDoesNotRefreshOrCreateReplacement() = runTest {
-    val runtime = RecordingRuntime().apply { failSessionDeletes = true }
-    val controller = ChatController(runtime, backgroundScope)
-    controller.connect()
-    controller.openSession("stored-1")
-    val activeIdentity = controller.state.value.chat
-
-    controller.deleteSession("stored-1")
-
-    assertEquals(listOf("stored-1"), runtime.deletedSessions)
-    assertEquals(1, runtime.sessionListRequests)
-    assertEquals(0, runtime.createdSessions)
-    assertEquals(activeIdentity, controller.state.value.chat)
-    assertNotNull(controller.state.value.error)
-  }
-
-  @Test
-  fun durableMutationPropagatesCancellationWithoutRefreshing() = runTest {
-    val runtime = RecordingRuntime().apply { cancelSessionUpdates = true }
-    val controller = ChatController(runtime, backgroundScope)
-    controller.connect()
-
-    val result = runCatching { controller.setPinned("stored-1", true) }
-
-    assertTrue(result.exceptionOrNull() is CancellationException)
-    assertEquals(1, runtime.sessionListRequests)
-    assertNull(controller.state.value.error)
-  }
-
-  @Test
-  fun stalePendingMutationCannotRefreshAfterControllerClose() = runTest {
-    val runtime = RecordingRuntime().apply { delaySessionUpdates = true }
-    val controller = ChatController(runtime, backgroundScope)
-    controller.connect()
-
-    val mutation = async { controller.setPinned("stored-1", true) }
-    runCurrent()
-    controller.close()
-    runtime.completeSessionUpdate("stored-1")
-    mutation.await()
-
-    assertEquals(1, runtime.sessionListRequests)
-    assertEquals(ConnectionPhase.CONNECTED, controller.state.value.phase)
-  }
-
-  @Test
-  fun sessionsChangedEventsConflateRefreshesWhileOneIsInFlight() = runTest {
-    val runtime = RecordingRuntime()
-    val controller = ChatController(runtime, backgroundScope)
-    controller.connect()
-    runtime.delaySessionLists = true
-    runtime.listedSessions = listOf(runtime.summary("stored-refreshed"))
-
-    runtime.events.emit(sessionsChangedEvent())
-    runCurrent()
-    assertEquals(2, runtime.sessionListRequests)
-
-    repeat(3) { runtime.events.emit(sessionsChangedEvent()) }
-    runCurrent()
-    runtime.completeSessionList()
-    runCurrent()
-
-    assertEquals(3, runtime.sessionListRequests)
-    assertEquals(listOf("stored-refreshed"), controller.state.value.sessions.map { it.storedId })
-
-    runtime.completeSessionList()
-    runCurrent()
-    assertEquals(3, runtime.sessionListRequests)
-  }
-
   private fun archivedSummary(id: String) = SessionSummary(
     storedId = id,
     title = "",
@@ -416,13 +344,6 @@ class ChatControllerTest {
     archived = true,
   )
 
-  private fun sessionsChangedEvent() = GatewayEvent(
-    type = GatewayEventType.SESSIONS_CHANGED,
-    wireType = "sessions.changed",
-    runtimeSessionId = null,
-    payload = buildJsonObject {},
-  )
-
   private class RecordingRuntime : MobileGatewayRuntime {
     override val events = MutableSharedFlow<GatewayEvent>(extraBufferCapacity = 8)
     val lifecycleCalls = mutableListOf<String>()
@@ -431,7 +352,6 @@ class ChatControllerTest {
     val interrupted = mutableListOf<String>()
     val pinnedUpdates = mutableListOf<Pair<String, Boolean>>()
     val archivedUpdates = mutableListOf<Pair<String, Boolean>>()
-    val deletedSessions = mutableListOf<String>()
     val modelOptionsRequests = mutableListOf<String>()
     val modelOptionRefreshes = mutableListOf<Boolean>()
     val modelSelections = mutableListOf<Pair<String, Pair<String, String>>>()
@@ -441,38 +361,23 @@ class ChatControllerTest {
     var sessionListRequests = 0
     var failPrompts = false
     var failSessionUpdates = false
-    var failSessionDeletes = false
-    var cancelSessionUpdates = false
     var failResumes = false
     var modelSwitchResult: ModelSwitchResult = ModelSwitchResult.Applied
     var delayResumes = false
     var delayModelOptions = false
-    var delaySessionUpdates = false
-    var delaySessionLists = false
-    var createdSessions = 0
     private val pendingResumes = mutableMapOf<String, CompletableDeferred<ActiveSession>>()
     private var pendingModelOptions: CompletableDeferred<ModelCatalog>? = null
-    private val pendingSessionUpdates = mutableMapOf<String, CompletableDeferred<Unit>>()
-    private val pendingSessionLists = ArrayDeque<CompletableDeferred<List<SessionSummary>>>()
 
     override suspend fun connect() = Unit
 
     override suspend fun listSessions(): List<SessionSummary> {
       lifecycleCalls += "list"
       sessionListRequests += 1
-      if (!delaySessionLists) return listedSessions
-      return CompletableDeferred<List<SessionSummary>>()
-        .also(pendingSessionLists::addLast)
-        .await()
-    }
-
-    fun completeSessionList() {
-      pendingSessionLists.removeFirst().complete(listedSessions)
+      return listedSessions
     }
 
     override suspend fun createSession(): ActiveSession {
       lifecycleCalls += "create"
-      createdSessions += 1
       return active("runtime-new", "stored-new")
     }
 
@@ -558,11 +463,7 @@ class ChatControllerTest {
       archived: Boolean?,
       pinned: Boolean?,
     ) {
-      if (cancelSessionUpdates) throw CancellationException("cancelled")
       if (failSessionUpdates) error("gateway unavailable")
-      if (delaySessionUpdates) {
-        pendingSessionUpdates.getOrPut(storedId) { CompletableDeferred() }.await()
-      }
       if (archived != null) {
         archivedUpdates += storedId to archived
         listedSessions = listedSessions.map { session ->
@@ -575,16 +476,6 @@ class ChatControllerTest {
           if (session.storedId == storedId) session.copy(pinned = pinned) else session
         }
       }
-    }
-
-    fun completeSessionUpdate(storedId: String) {
-      pendingSessionUpdates.getOrPut(storedId) { CompletableDeferred() }.complete(Unit)
-    }
-
-    override suspend fun deleteSession(storedId: String) {
-      deletedSessions += storedId
-      if (failSessionDeletes) error("gateway unavailable")
-      listedSessions = listedSessions.filterNot { it.storedId == storedId }
     }
 
     override fun close() = Unit
