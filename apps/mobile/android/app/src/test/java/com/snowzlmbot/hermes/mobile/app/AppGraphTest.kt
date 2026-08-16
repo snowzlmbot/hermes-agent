@@ -12,10 +12,15 @@ import com.snowzlmbot.hermes.mobile.core.ProfileStore
 import com.snowzlmbot.hermes.mobile.core.SecretValue
 import com.snowzlmbot.hermes.mobile.core.StoredGatewayAuth
 import java.time.Instant
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import okhttp3.WebSocketListener
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppGraphTest {
@@ -47,6 +52,66 @@ class AppGraphTest {
     val graph = AppGraph(GatewayProfileRepository(profiles, RecordingCredentialStore()))
 
     assertNull(graph.restoreConnection())
+  }
+
+  @Test
+  fun staticTokenMintsSingleUseTicketBeforeSocketConnect() = runBlocking {
+    val server = MockWebServer()
+    server.enqueue(ticketResponse("single-use-ticket"))
+    server.enqueue(webSocketResponse())
+    server.start()
+    try {
+      val (graph, connection) = staticTokenGraph(server)
+      val runtime = graph.runtime(connection)
+      try {
+        runtime.connect()
+
+        val ticketRequest = server.takeRequest()
+        val socketRequest = server.takeRequest()
+        assertStaticTokenTicketRequest(ticketRequest, "durable-token")
+        assertEquals("/proxy/api/ws", socketRequest.requestUrl?.encodedPath)
+        assertEquals("single-use-ticket", socketRequest.requestUrl?.queryParameter("ticket"))
+        assertNull(socketRequest.requestUrl?.queryParameter("token"))
+        assertFalse(socketRequest.path.orEmpty().contains("durable-token"))
+      } finally {
+        runtime.close()
+      }
+    } finally {
+      server.shutdown()
+    }
+  }
+
+  @Test
+  fun staticTokenReconnectMintsAnotherSingleUseTicket() = runBlocking {
+    val server = MockWebServer()
+    server.enqueue(ticketResponse("first-ticket"))
+    server.enqueue(MockResponse().setResponseCode(401))
+    server.enqueue(ticketResponse("second-ticket"))
+    server.enqueue(webSocketResponse())
+    server.start()
+    try {
+      val (graph, connection) = staticTokenGraph(server)
+      val runtime = graph.runtime(connection)
+      try {
+        assertTrue(runCatching { runtime.connect() }.isFailure)
+        runtime.connect()
+
+        val firstTicketRequest = server.takeRequest()
+        val firstSocketRequest = server.takeRequest()
+        val secondTicketRequest = server.takeRequest()
+        val secondSocketRequest = server.takeRequest()
+        assertStaticTokenTicketRequest(firstTicketRequest, "durable-token")
+        assertEquals("first-ticket", firstSocketRequest.requestUrl?.queryParameter("ticket"))
+        assertNull(firstSocketRequest.requestUrl?.queryParameter("token"))
+        assertStaticTokenTicketRequest(secondTicketRequest, "durable-token")
+        assertEquals("second-ticket", secondSocketRequest.requestUrl?.queryParameter("ticket"))
+        assertNull(secondSocketRequest.requestUrl?.queryParameter("token"))
+      } finally {
+        runtime.close()
+      }
+    } finally {
+      server.shutdown()
+    }
   }
 
   @Test
@@ -98,6 +163,38 @@ class AppGraphTest {
     } catch (_: IllegalStateException) {
       // The runtime rechecks repository state while holding the lifecycle lock.
     }
+  }
+
+  private suspend fun staticTokenGraph(server: MockWebServer): Pair<AppGraph, GatewayConnection> {
+    val repository = GatewayProfileRepository(
+      profileStore = RecordingProfileStore(),
+      credentialStore = RecordingCredentialStore(),
+      allowInsecureTransport = true,
+    )
+    val profile = GatewayProfile(
+      address = server.url("/proxy/").toString(),
+      authMode = GatewayAuthMode.TOKEN,
+      allowInsecure = true,
+    )
+    repository.save(profile, SecretValue("durable-token"))
+    return AppGraph(repository) to requireNotNull(repository.load())
+  }
+
+  private fun ticketResponse(ticket: String): MockResponse =
+    MockResponse().setResponseCode(200).setBody("""{"ticket":"$ticket"}""")
+
+  private fun webSocketResponse(): MockResponse =
+    MockResponse().withWebSocketUpgrade(object : WebSocketListener() {})
+
+  private fun assertStaticTokenTicketRequest(
+    request: okhttp3.mockwebserver.RecordedRequest,
+    token: String,
+  ) {
+    assertEquals("POST", request.method)
+    assertEquals("/proxy/api/auth/ws-ticket", request.requestUrl?.encodedPath)
+    assertEquals("Bearer $token", request.getHeader("Authorization"))
+    assertEquals(token, request.getHeader("X-Hermes-Session-Token"))
+    assertFalse(request.path.orEmpty().contains(token))
   }
 
   private class RecordingProfileStore : ProfileStore {

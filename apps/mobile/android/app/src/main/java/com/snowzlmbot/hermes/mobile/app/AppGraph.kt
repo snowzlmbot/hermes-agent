@@ -3,6 +3,7 @@ package com.snowzlmbot.hermes.mobile.app
 import com.snowzlmbot.hermes.mobile.core.GatewayAuthMode
 import com.snowzlmbot.hermes.mobile.core.GatewayAuthCoordinator
 import com.snowzlmbot.hermes.mobile.core.GatewayConnection
+import com.snowzlmbot.hermes.mobile.core.GatewayCredential
 import com.snowzlmbot.hermes.mobile.core.GatewayProfile
 import com.snowzlmbot.hermes.mobile.core.GatewayProfileRepository
 import com.snowzlmbot.hermes.mobile.core.GatewayRestClient
@@ -104,7 +105,13 @@ internal class AppGraph(
     val rest = GatewayRestClient(endpoint, restCredential)
     val socket = GatewaySocketClient(
       endpoint = endpoint,
-      credentialProvider = { connection.credential() },
+      credentialProvider = {
+        when (connection.profile.authMode) {
+          GatewayAuthMode.TOKEN -> GatewayCredential.Ticket(rest.mintWebSocketTicket())
+          GatewayAuthMode.TICKET -> connection.credential()
+          GatewayAuthMode.OAUTH -> error("OAuth handled above")
+        }
+      },
     )
     HermesMobileRuntime(
       rpc = socket,
