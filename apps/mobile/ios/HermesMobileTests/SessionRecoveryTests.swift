@@ -3,11 +3,13 @@ import XCTest
 
 final class SessionRecoveryTests: XCTestCase {
     @MainActor
-    func testRepeatedActiveSceneEventsShareOneDirectedRecovery() async throws {
+    func testStaticTokenUsesFreshTicketsWithoutEnteringWebSocketURLOnReconnect() async throws {
+        let staticToken = "static-token-must-stay-out-of-websocket-urls"
         let profile = GatewayProfile(
             id: "default",
-            endpoint: "https://gateway.example.com",
-            authMode: .token
+            endpoint: "http://gateway.example.com",
+            authMode: .token,
+            allowInsecure: true
         )
         let selections = InMemoryStoredSessionSelectionStore(
             selections: [profile.sessionSelectionScope: "stored-target"]
@@ -15,13 +17,16 @@ final class SessionRecoveryTests: XCTestCase {
         let repository = GatewayProfileRepository(
             profileStore: InMemoryGatewayProfileStore(),
             credentialStore: InMemoryCredentialStore(),
-            sessionSelectionStore: selections
+            sessionSelectionStore: selections,
+            allowsInsecureTransport: true
         )
         try await repository.save(
             profile: profile,
-            credentials: GatewayCredentials(token: "secret")
+            credentials: GatewayCredentials(token: staticToken)
         )
 
+        let session = makeStaticTokenTicketSession()
+        defer { session.invalidateAndCancel() }
         let initialSocket = RecoverySocket()
         let foregroundSocket = RecoverySocket()
         let sockets = RecoverySocketQueue([initialSocket, foregroundSocket])
@@ -30,7 +35,9 @@ final class SessionRecoveryTests: XCTestCase {
                 profileRepository: repository,
                 notificationService: RecoveryNotificationService(),
                 attachmentImporter: AttachmentImportService(),
-                socketFactory: { _ in sockets.next() }
+                socketFactory: { url in sockets.next(url: url) },
+                urlSession: session,
+                allowsInsecureTransport: true
             )
         )
 
@@ -73,6 +80,16 @@ final class SessionRecoveryTests: XCTestCase {
         XCTAssertEqual(model.selectedSessionID, "stored-target")
         XCTAssertEqual(model.chatModel?.state.runtimeSessionID, "runtime-foreground")
         XCTAssertEqual(sockets.createdCount, 2)
+        let ticketRequests = StaticTokenTicketURLProtocol.records(for: staticToken)
+        let webSocketURLs = sockets.createdURLs
+        XCTAssertEqual(ticketRequests.count, 2)
+        XCTAssertEqual(ticketRequests.map(\.url.path), ["/api/auth/ws-ticket", "/api/auth/ws-ticket"])
+        XCTAssertEqual(ticketRequests.map(\.authorization), Array(repeating: "Bearer \(staticToken)", count: 2))
+        XCTAssertEqual(ticketRequests.map(\.sessionToken), Array(repeating: staticToken, count: 2))
+        XCTAssertEqual(webSocketURLs.count, 2)
+        XCTAssertEqual(webSocketURLs.map(ticketQueryItems), ticketRequests.map { [URLQueryItem(name: "ticket", value: $0.ticket)] })
+        XCTAssertEqual(Set(ticketRequests.map(\.ticket)).count, 2)
+        XCTAssertTrue(webSocketURLs.allSatisfy { !$0.absoluteString.contains(staticToken) })
     }
 
     @MainActor
@@ -226,13 +243,16 @@ final class SessionRecoveryTests: XCTestCase {
             profile: profile,
             credentials: GatewayCredentials(token: "secret")
         )
+        let session = makeStaticTokenTicketSession()
+        defer { session.invalidateAndCancel() }
         let socket = RecoverySocket()
         let notifications = RecoveryNotificationService()
         let model = AppModel(dependencies: AppDependencies(
             profileRepository: repository,
             notificationService: notifications,
             attachmentImporter: AttachmentImportService(),
-            socketFactory: { _ in socket }
+            socketFactory: { _ in socket },
+            urlSession: session
         ))
 
         await model.handleNotificationRoute(NotificationRoute(
@@ -296,12 +316,15 @@ final class SessionRecoveryTests: XCTestCase {
             profile: profile,
             credentials: GatewayCredentials(token: "secret")
         )
+        let session = makeStaticTokenTicketSession()
+        defer { session.invalidateAndCancel() }
         let socket = RecoverySocket()
         let model = AppModel(dependencies: AppDependencies(
             profileRepository: repository,
             notificationService: RecoveryNotificationService(),
             attachmentImporter: AttachmentImportService(),
-            socketFactory: { _ in socket }
+            socketFactory: { _ in socket },
+            urlSession: session
         ))
 
         let bootstrap = Task { await model.bootstrap(arguments: []) }
@@ -378,10 +401,74 @@ private actor RecoveryNotificationService: NotificationScheduling {
     func scheduleInput(route: NotificationRoute) async {}
 }
 
+private struct StaticTokenTicketRequest: Sendable {
+    let url: URL
+    let authorization: String?
+    let sessionToken: String?
+    let ticket: String
+}
+
+private final class StaticTokenTicketURLProtocol: URLProtocol, @unchecked Sendable {
+    private final class State: @unchecked Sendable {
+        let lock = NSLock()
+        var captured: [StaticTokenTicketRequest] = []
+    }
+
+    private static let state = State()
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    static func records(for sessionToken: String) -> [StaticTokenTicketRequest] {
+        state.lock.withLock { state.captured.filter { $0.sessionToken == sessionToken } }
+    }
+
+    override func startLoading() {
+        guard let url = request.url else {
+            client?.urlProtocol(self, didFailWithError: GatewayRESTError.invalidResponse)
+            return
+        }
+        let ticket = "single-use-ticket-\(UUID().uuidString)"
+        Self.state.lock.withLock {
+            Self.state.captured.append(StaticTokenTicketRequest(
+                url: url,
+                authorization: request.value(forHTTPHeaderField: "Authorization"),
+                sessionToken: request.value(forHTTPHeaderField: "X-Hermes-Session-Token"),
+                ticket: ticket
+            ))
+        }
+        guard let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        ) else {
+            client?.urlProtocol(self, didFailWithError: GatewayRESTError.invalidResponse)
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{\"ticket\":\"\(ticket)\"}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private func makeStaticTokenTicketSession() -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [StaticTokenTicketURLProtocol.self]
+    return URLSession(configuration: configuration)
+}
+
+private func ticketQueryItems(_ url: URL) -> [URLQueryItem] {
+    URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+}
+
 private final class RecoverySocketQueue: @unchecked Sendable {
     private let lock = NSLock()
     private var sockets: [any GatewaySocket]
     private var count = 0
+    private var urls: [URL] = []
 
     init(_ sockets: [any GatewaySocket]) {
         self.sockets = sockets
@@ -391,9 +478,14 @@ private final class RecoverySocketQueue: @unchecked Sendable {
         lock.withLock { count }
     }
 
-    func next() -> any GatewaySocket {
+    var createdURLs: [URL] {
+        lock.withLock { urls }
+    }
+
+    func next(url: URL? = nil) -> any GatewaySocket {
         lock.withLock {
             count += 1
+            if let url { urls.append(url) }
             return sockets.removeFirst()
         }
     }
