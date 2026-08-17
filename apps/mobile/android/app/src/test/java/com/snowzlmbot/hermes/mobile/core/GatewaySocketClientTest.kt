@@ -1,10 +1,12 @@
 package com.snowzlmbot.hermes.mobile.core
 
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -68,17 +70,22 @@ class GatewaySocketClientTest {
       httpClient = OkHttpClient.Builder().readTimeout(0, TimeUnit.MILLISECONDS).build(),
     )
 
-    val ready = async { socket.events.first { it.type == GatewayEventType.GATEWAY_READY } }
+    try {
+      withTimeout(5_000) {
+        val ready = async(start = CoroutineStart.UNDISPATCHED) { socket.events.first { it.type == GatewayEventType.GATEWAY_READY } }
     socket.connect()
     assertEquals(GatewayEventType.GATEWAY_READY, ready.await().type)
-    val changed = async { socket.events.first { it.type == GatewayEventType.SESSIONS_CHANGED } }
+    val changed = async(start = CoroutineStart.UNDISPATCHED) { socket.events.first { it.type == GatewayEventType.SESSIONS_CHANGED } }
     val result = socket.request("session.list", buildJsonObject { put("limit", 20) })
 
     assertEquals(0, result["sessions"]?.jsonArray?.size)
     assertEquals(GatewayEventType.SESSIONS_CHANGED, changed.await().type)
     assertEquals(1, credentialCalls)
-    assertEquals("/proxy/api/ws?ticket=ticket-1", server.takeRequest().path)
-    socket.close()
+        assertEquals("/proxy/api/ws?ticket=ticket-1", server.takeRequest(5, TimeUnit.SECONDS)?.path)
+      }
+    } finally {
+      socket.close()
+    }
   }
 
   @Test

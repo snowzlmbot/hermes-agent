@@ -45,6 +45,7 @@ jobs:
           timeout --signal=TERM --kill-after=30s 5m \
             ./gradlew --no-daemon --console=plain testDebugUnitTest \
             --tests com.snowzlmbot.hermes.mobile.app.AppGraphTest \
+            --tests com.snowzlmbot.hermes.mobile.core.GatewaySocketClientTest \
             --tests com.snowzlmbot.hermes.mobile.feature.ChatControllerTest \
             --tests com.snowzlmbot.hermes.mobile.ui.CriticalUxTest
       - name: Run unit tests

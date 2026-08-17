@@ -19,9 +19,10 @@ def test_explicit_pairing_output(tmp_path, monkeypatch, capsys) -> None:
     secret.write_text(token)
     os.chmod(pairing, 0o600)
     os.chmod(secret, 0o600)
-    hidden = install._pairing_output({"action": "paired"}, argparse.Namespace(show_pairing=False))
+    handler_result = {"action": "paired", "path": str(pairing), "endpoint": "https://100.64.0.10:443"}
+    hidden = install._pairing_output(dict(handler_result), argparse.Namespace(show_pairing=False))
     assert "pairing_secret" not in hidden
-    result = install._pairing_output({"action": "paired"}, argparse.Namespace(show_pairing=True))
+    result = install._pairing_output(dict(handler_result), argparse.Namespace(show_pairing=True))
     install._emit(result, as_json=False)
     output = capsys.readouterr().out
     assert token in output

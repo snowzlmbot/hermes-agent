@@ -2,6 +2,9 @@
 
 这是专用移动分支的阶段性Beta预发布，不是RC、App Store或Google Play正式版本。
 
+- Tag：`hermes-mobile-beta-v0.2.0`
+- Branch：`hermes-agent-Mobile-app`
+
 ## 本版重点
 
 - Android可安装Beta APK，新增中英文关键界面、无障碍标签和删除确认。
