@@ -32,10 +32,16 @@ public final class AudioRecordingService {
     public static let maximumDuration: TimeInterval = 60
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
+    private var isStarting = false
 
     public init() {}
 
     public func start() async throws {
+        guard !isStarting, recorder == nil, recordingURL == nil else {
+            throw AudioServiceError.recordingFailed
+        }
+        isStarting = true
+        defer { isStarting = false }
         let granted = await withCheckedContinuation { continuation in
             AVAudioApplication.requestRecordPermission { allowed in
                 continuation.resume(returning: allowed)
@@ -120,6 +126,7 @@ extension AudioPlaybackService: AudioPlaybackServiceProtocol {}
 public final class AudioInteractionModel {
     public static let maximumRecordingDuration: Duration = .seconds(AudioRecordingService.maximumDuration)
     public private(set) var isRecording = false
+    public private(set) var isStartingRecording = false
     public private(set) var isTranscribing = false
     public private(set) var isSpeaking = false
     public private(set) var errorMessage: String?
@@ -144,7 +151,9 @@ public final class AudioInteractionModel {
         using client: any AudioTranscriptionClient,
         onTranscript: @escaping @MainActor @Sendable (String) -> Void
     ) async {
-        guard !isRecording, !isTranscribing else { return }
+        guard !isStartingRecording, !isRecording, !isTranscribing else { return }
+        isStartingRecording = true
+        defer { isStartingRecording = false }
         recordingLimitTask?.cancel()
         recordingLimitTask = nil
         do {

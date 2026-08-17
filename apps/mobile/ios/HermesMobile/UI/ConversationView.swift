@@ -35,6 +35,7 @@ struct ConversationView: View {
                         text: $composerText,
                         isStreaming: chat.state.isStreaming,
                         isRecording: audioModel.isRecording,
+                        isStartingRecording: audioModel.isStartingRecording,
                         isTranscribing: audioModel.isTranscribing,
                         onSend: send,
                         onStop: stop,

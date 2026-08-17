@@ -12,8 +12,10 @@ import com.snowzlmbot.hermes.mobile.core.ProfileStore
 import com.snowzlmbot.hermes.mobile.core.SecretValue
 import com.snowzlmbot.hermes.mobile.core.StoredGatewayAuth
 import java.time.Instant
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -66,8 +68,8 @@ class AppGraphTest {
       try {
         runtime.connect()
 
-        val ticketRequest = server.takeRequest()
-        val socketRequest = server.takeRequest()
+        val ticketRequest = server.requireRequest()
+        val socketRequest = server.requireRequest()
         assertStaticTokenTicketRequest(ticketRequest, "durable-token")
         assertEquals("/proxy/api/ws", socketRequest.requestUrl?.encodedPath)
         assertEquals("single-use-ticket", socketRequest.requestUrl?.queryParameter("ticket"))
@@ -96,10 +98,10 @@ class AppGraphTest {
         assertTrue(runCatching { runtime.connect() }.isFailure)
         runtime.connect()
 
-        val firstTicketRequest = server.takeRequest()
-        val firstSocketRequest = server.takeRequest()
-        val secondTicketRequest = server.takeRequest()
-        val secondSocketRequest = server.takeRequest()
+        val firstTicketRequest = server.requireRequest()
+        val firstSocketRequest = server.requireRequest()
+        val secondTicketRequest = server.requireRequest()
+        val secondSocketRequest = server.requireRequest()
         assertStaticTokenTicketRequest(firstTicketRequest, "durable-token")
         assertEquals("first-ticket", firstSocketRequest.requestUrl?.queryParameter("ticket"))
         assertNull(firstSocketRequest.requestUrl?.queryParameter("token"))
@@ -180,11 +182,18 @@ class AppGraphTest {
     return AppGraph(repository) to requireNotNull(repository.load())
   }
 
+  private fun MockWebServer.requireRequest() =
+    requireNotNull(takeRequest(5, TimeUnit.SECONDS)) { "Timed out waiting for gateway request" }
+
   private fun ticketResponse(ticket: String): MockResponse =
     MockResponse().setResponseCode(200).setBody("""{"ticket":"$ticket"}""")
 
   private fun webSocketResponse(): MockResponse =
-    MockResponse().withWebSocketUpgrade(object : WebSocketListener() {})
+    MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+      override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+        webSocket.close(code, null)
+      }
+    })
 
   private fun assertStaticTokenTicketRequest(
     request: okhttp3.mockwebserver.RecordedRequest,

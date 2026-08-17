@@ -43,7 +43,7 @@
   <string name="session_empty_view">No sessions in this view</string>
   <string name="session_empty_search">No matching sessions</string>
   <string name="session_pinned_content_description">Pinned</string>
-  <string name="session_actions_content_description">Session actions</string>
+  <string name="session_actions_content_description">Actions for %1$s</string>
   <string name="session_action_restore">Restore</string>
   <string name="session_action_unpin">Unpin</string>
   <string name="session_action_pin">Pin</string>

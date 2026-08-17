@@ -477,7 +477,13 @@ internal fun SessionDrawer(
         }
         Box {
           IconButton(onClick = { menuId = session.storedId }) {
-            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.session_actions_content_description))
+            Icon(
+              Icons.Default.MoreVert,
+              contentDescription = stringResource(
+                R.string.session_actions_content_description,
+                localizedSessionTitle(session),
+              ),
+            )
           }
           DropdownMenu(expanded = menuId == session.storedId, onDismissRequest = { menuId = null }) {
             if (session.archived) {

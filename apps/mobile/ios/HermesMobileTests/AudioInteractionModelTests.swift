@@ -78,6 +78,18 @@ final class AudioInteractionModelTests: XCTestCase {
         XCTAssertEqual(model.errorMessage, String(localized: "audio.playback.error"))
     }
 
+    func testRecordingCannotStartTwiceWhileFirstStartIsSuspended() async {
+        let recorder = FakeRecordingService(startDelay: .milliseconds(50))
+        let model = AudioInteractionModel(recordingService: recorder, playbackService: FakePlaybackService())
+        let first = Task { await model.startRecording(using: FakeAudioClient()) { _ in } }
+        await Task.yield()
+        XCTAssertTrue(model.isStartingRecording)
+        await model.startRecording(using: FakeAudioClient()) { _ in }
+        XCTAssertEqual(recorder.startCallCount, 1)
+        _ = await first.value
+        model.cancelRecording()
+    }
+
     func testRecordingCannotRestartWhileTranscribing() async {
         let recorder = FakeRecordingService()
         let client = FakeAudioClient(transcriptionDelay: .milliseconds(50))
@@ -104,14 +116,17 @@ final class AudioInteractionModelTests: XCTestCase {
         )
 
         var automaticTranscript: String?
-        await model.startRecording(using: FakeAudioClient(transcript: "limit transcript")) { text in
+        let client = FakeAudioClient(transcript: "limit transcript")
+        await model.startRecording(using: client) { text in
             automaticTranscript = text
         }
         try await Task.sleep(for: .milliseconds(50))
+        let automaticDataURL = await client.lastTranscriptionDataURL
 
         XCTAssertFalse(model.isRecording)
         XCTAssertEqual(recorder.stopCallCount, 1)
         XCTAssertEqual(automaticTranscript, "limit transcript")
+        XCTAssertTrue(automaticDataURL?.hasPrefix("data:audio/mp4;base64,") == true)
         XCTAssertEqual(model.errorMessage, String(localized: "audio.recording.limit"))
     }
 
@@ -138,17 +153,24 @@ final class AudioInteractionModelTests: XCTestCase {
 @MainActor
 private final class FakeRecordingService: AudioRecordingServiceProtocol {
     private let startError: Error?
+    private let startDelay: Duration?
     private let stopError: Error?
     private(set) var startCallCount = 0
     private(set) var stopCallCount = 0
 
-    init(startError: Error? = nil, stopError: Error? = nil) {
+    init(
+        startError: Error? = nil,
+        startDelay: Duration? = nil,
+        stopError: Error? = nil
+    ) {
         self.startError = startError
+        self.startDelay = startDelay
         self.stopError = stopError
     }
 
     func start() async throws {
         startCallCount += 1
+        if let startDelay { try await Task.sleep(for: startDelay) }
         if let startError { throw startError }
     }
 
@@ -186,6 +208,7 @@ private actor FakeAudioClient: AudioTranscriptionClient {
     private let transcriptionError: FakeError?
     private let transcriptionDelay: Duration?
     private(set) var transcriptionCallCount = 0
+    private(set) var lastTranscriptionDataURL: String?
 
     init(
         transcript: String = "transcript",
@@ -199,6 +222,7 @@ private actor FakeAudioClient: AudioTranscriptionClient {
 
     func transcription(dataURL: String, mimeType: String) async throws -> String {
         transcriptionCallCount += 1
+        lastTranscriptionDataURL = dataURL
         if let transcriptionDelay { try await Task.sleep(for: transcriptionDelay) }
         if let transcriptionError { throw transcriptionError }
         return transcript

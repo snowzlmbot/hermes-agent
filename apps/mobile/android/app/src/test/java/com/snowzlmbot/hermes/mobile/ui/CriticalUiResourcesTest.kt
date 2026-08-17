@@ -44,7 +44,7 @@ class CriticalUiResourcesTest {
     formatArgument.findAll(value).map { it.value }.toList()
 
   private companion object {
-    val formatArgument = Regex("%\\d+\\\$[a-zA-Z]")
+    val formatArgument = Regex("%(?:\\d+\\$)?[a-zA-Z]")
 
     val requiredKeys = setOf(
       "loading_connecting",

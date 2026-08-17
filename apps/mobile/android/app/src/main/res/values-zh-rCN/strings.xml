@@ -43,7 +43,7 @@
   <string name="session_empty_view">当前视图中没有会话</string>
   <string name="session_empty_search">没有匹配的会话</string>
   <string name="session_pinned_content_description">已置顶</string>
-  <string name="session_actions_content_description">会话操作</string>
+  <string name="session_actions_content_description">%1$s 的会话操作</string>
   <string name="session_action_restore">恢复</string>
   <string name="session_action_unpin">取消置顶</string>
   <string name="session_action_pin">置顶</string>
