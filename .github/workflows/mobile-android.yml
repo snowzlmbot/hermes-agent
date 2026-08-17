@@ -24,7 +24,7 @@ jobs:
   verify:
     name: Android test, lint, and APKs
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -39,11 +39,21 @@ jobs:
           java-version: "17"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@4d9f0ba0025fe599b4ebab900eb7f3a1d93ef4c2 # v5.0.2
+      - name: Run critical lifecycle tests
+        working-directory: apps/mobile/android
+        run: |
+          timeout --signal=TERM --kill-after=30s 5m \
+            ./gradlew --no-daemon --console=plain testDebugUnitTest \
+            --tests com.snowzlmbot.hermes.mobile.app.AppGraphTest \
+            --tests com.snowzlmbot.hermes.mobile.feature.ChatControllerTest \
+            --tests com.snowzlmbot.hermes.mobile.ui.CriticalUxTest
       - name: Run unit tests
         working-directory: apps/mobile/android
         run: |
-          ./gradlew --no-daemon --console=plain testDebugUnitTest
-          ./gradlew --no-daemon --console=plain testReleaseUnitTest \
+          timeout --signal=TERM --kill-after=30s 12m \
+            ./gradlew --no-daemon --console=plain testDebugUnitTest
+          timeout --signal=TERM --kill-after=30s 3m \
+            ./gradlew --no-daemon --console=plain testReleaseUnitTest \
             --tests com.snowzlmbot.hermes.mobile.TransportBuildPolicyTest
       - name: Run Android lint
         working-directory: apps/mobile/android

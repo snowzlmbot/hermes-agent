@@ -63,6 +63,13 @@ kotlin {
   }
 }
 
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+  testLogging {
+    events("started", "passed", "skipped", "failed")
+    exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+  }
+}
+
 dependencies {
   val composeBom = platform("androidx.compose:compose-bom:2026.05.01")
 
