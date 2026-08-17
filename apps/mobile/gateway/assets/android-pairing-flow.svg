@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="300" viewBox="0 0 1080 300" role="img" aria-labelledby="t d">
+<title id="t">Hermes Mobile Android pairing flow</title>
+<desc id="d">Probe and dry run, install with explicit pairing output, enter endpoint and secret in Android app, mint a single-use ticket and connect.</desc>
+<rect width="1080" height="300" rx="24" fill="#0b1020"/>
+<text x="540" y="38" text-anchor="middle" fill="#f8fafc" font-size="24" font-family="sans-serif" font-weight="700">Android App 配对流程</text>
+<g font-family="sans-serif" text-anchor="middle">
+<rect x="35" y="75" width="220" height="150" rx="18" fill="#172554" stroke="#60a5fa" stroke-width="2"/>
+<text x="145" y="115" fill="#bfdbfe" font-size="19" font-weight="700">1. 安全检查</text><text x="145" y="150" fill="#e2e8f0" font-size="15">probe</text><text x="145" y="178" fill="#e2e8f0" font-size="15">install --dry-run</text><text x="145" y="205" fill="#fca5a5" font-size="13">异常立即停止</text>
+<rect x="300" y="75" width="220" height="150" rx="18" fill="#14532d" stroke="#4ade80" stroke-width="2"/>
+<text x="410" y="115" fill="#bbf7d0" font-size="19" font-weight="700">2. 安装并配对</text><text x="410" y="153" fill="#e2e8f0" font-size="15">install / pair</text><text x="410" y="181" fill="#e2e8f0" font-size="15">--show-pairing</text><text x="410" y="207" fill="#fde68a" font-size="13">输出端点 + 配对密钥</text>
+<rect x="565" y="75" width="220" height="150" rx="18" fill="#4c1d95" stroke="#c084fc" stroke-width="2"/>
+<text x="675" y="115" fill="#e9d5ff" font-size="19" font-weight="700">3. Android App</text><text x="675" y="153" fill="#e2e8f0" font-size="15">填写完整 endpoint</text><text x="675" y="181" fill="#e2e8f0" font-size="15">粘贴 pairing secret</text><text x="675" y="207" fill="#fca5a5" font-size="13">密钥不得放入URL</text>
+<rect x="830" y="75" width="215" height="150" rx="18" fill="#7c2d12" stroke="#fb923c" stroke-width="2"/>
+<text x="938" y="115" fill="#fed7aa" font-size="19" font-weight="700">4. 安全连接</text><text x="938" y="153" fill="#e2e8f0" font-size="15">POST ws-ticket</text><text x="938" y="181" fill="#e2e8f0" font-size="15">WSS ?ticket=...</text><text x="938" y="207" fill="#bbf7d0" font-size="13">每次重连重新mint</text>
+</g>
+<g stroke="#94a3b8" stroke-width="4" fill="none"><path d="M255 150h35"/><path d="M520 150h35"/><path d="M785 150h35"/></g>
+<g fill="#94a3b8"><path d="M290 150l-12-8v16z"/><path d="M555 150l-12-8v16z"/><path d="M820 150l-12-8v16z"/></g>
+<text x="540" y="270" text-anchor="middle" fill="#94a3b8" font-size="14" font-family="sans-serif">远端：HTTPS/WSS　·　同机Termux：仅 http://127.0.0.1:9120</text>
+</svg>

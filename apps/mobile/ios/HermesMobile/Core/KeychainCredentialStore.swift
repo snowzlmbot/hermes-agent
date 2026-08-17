@@ -21,7 +21,12 @@ public actor KeychainCredentialStore: CredentialStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: Self.itemIdentifier(profileID: profileID)
         ]
-        SecItemDelete(query as CFDictionary)
+        let attributes: [String: Any] = [kSecValueData as String: data]
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw CredentialError.keychainFailure(OSStatusCode(updateStatus))
+        }
         var item = query
         item[kSecValueData as String] = data
         let status = SecItemAdd(item as CFDictionary, nil)

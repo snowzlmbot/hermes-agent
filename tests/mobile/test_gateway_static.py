@@ -25,12 +25,17 @@ def test_external_protocol_uses_header_then_ticket_only() -> None:
     sidecar = (GATEWAY / "sidecar.py").read_text(encoding="utf-8")
     mobile_readme = (REPOSITORY_ROOT / "apps" / "mobile" / "README.md").read_text(encoding="utf-8")
     gateway_readme = (GATEWAY / "README.md").read_text(encoding="utf-8")
+    android_readme = (REPOSITORY_ROOT / "apps" / "mobile" / "android" / "README.md").read_text(encoding="utf-8")
     assert 'urlencode({"token": self.internal_token})' in sidecar
     assert "self.external_token" not in sidecar.split("def upstream_websocket_url", 1)[1].split("class TicketStore", 1)[0]
     assert "/api/ws?ticket=" in mobile_readme
     assert "/api/ws?ticket=" in gateway_readme
     assert "/api/ws?token=" not in mobile_readme
     assert "/api/ws?token=" not in gateway_readme
+    assert "/releases" in mobile_readme
+    assert "actions/workflows" not in mobile_readme
+    assert "--show-pairing" in android_readme
+    assert "--allow-loopback-http" in android_readme
 
 
 def test_official_workflow_is_fixed_to_tag_commit_and_collects_integration_test() -> None:

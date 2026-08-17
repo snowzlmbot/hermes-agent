@@ -33,6 +33,7 @@ public final class AudioRecordingService {
     private var recorder: AVAudioRecorder?
     private var recordingURL: URL?
     private var isStarting = false
+    private var generation = 0
 
     public init() {}
 
@@ -40,13 +41,18 @@ public final class AudioRecordingService {
         guard !isStarting, recorder == nil, recordingURL == nil else {
             throw AudioServiceError.recordingFailed
         }
+        generation += 1
+        let startGeneration = generation
         isStarting = true
-        defer { isStarting = false }
+        defer {
+            if generation == startGeneration { isStarting = false }
+        }
         let granted = await withCheckedContinuation { continuation in
             AVAudioApplication.requestRecordPermission { allowed in
                 continuation.resume(returning: allowed)
             }
         }
+        guard generation == startGeneration, !Task.isCancelled else { throw CancellationError() }
         guard granted else { throw AudioServiceError.microphoneDenied }
 
         let session = AVAudioSession.sharedInstance()
@@ -87,6 +93,8 @@ public final class AudioRecordingService {
     }
 
     public func cancel() {
+        generation += 1
+        isStarting = false
         recorder?.stop()
         recorder = nil
         if let recordingURL { try? FileManager.default.removeItem(at: recordingURL) }
@@ -136,6 +144,7 @@ public final class AudioInteractionModel {
     @ObservationIgnored private let maximumRecordingDuration: Duration
     @ObservationIgnored private var playbackTask: Task<Void, Never>?
     @ObservationIgnored private var recordingLimitTask: Task<Void, Never>?
+    @ObservationIgnored private var recordingGeneration = 0
 
     public init(
         recordingService: any AudioRecordingServiceProtocol = AudioRecordingService(),
@@ -152,6 +161,8 @@ public final class AudioInteractionModel {
         onTranscript: @escaping @MainActor @Sendable (String) -> Void
     ) async {
         guard !isStartingRecording, !isRecording, !isTranscribing else { return }
+        recordingGeneration += 1
+        let startGeneration = recordingGeneration
         isStartingRecording = true
         defer { isStartingRecording = false }
         recordingLimitTask?.cancel()
@@ -159,6 +170,10 @@ public final class AudioInteractionModel {
         do {
             errorMessage = nil
             try await recordingService.start()
+            guard startGeneration == recordingGeneration, !Task.isCancelled else {
+                recordingService.cancel()
+                return
+            }
             isRecording = true
             let limit = maximumRecordingDuration
             recordingLimitTask = Task { [weak self] in
@@ -168,6 +183,7 @@ public final class AudioInteractionModel {
             }
         } catch {
             isRecording = false
+            if error is CancellationError { return }
             if let audioError = error as? AudioServiceError, audioError == .microphoneDenied {
                 errorMessage = String(localized: "audio.microphone.error")
             } else {
@@ -199,6 +215,7 @@ public final class AudioInteractionModel {
     }
 
     public func cancelRecording() {
+        recordingGeneration += 1
         recordingLimitTask?.cancel()
         recordingLimitTask = nil
         recordingService.cancel()

@@ -612,18 +612,20 @@ def _assert_service_not_foreign(info: dict[str, Any]) -> None:
         )
 
 
-def _normalize_endpoint(endpoint: str) -> tuple[str, str]:
+def _normalize_endpoint(endpoint: str, *, allow_loopback_http: bool = False) -> tuple[str, str]:
     parsed = urlsplit(endpoint.strip())
-    if parsed.scheme.lower() != "https":
-        _fail("pairing endpoint must use HTTPS")
+    scheme = parsed.scheme.lower()
+    loopback_http = scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+    if scheme != "https" and not (allow_loopback_http and loopback_http):
+        _fail("pairing endpoint must use HTTPS unless explicit loopback HTTP is enabled")
     if not parsed.hostname or parsed.username is not None or parsed.password is not None:
-        _fail("pairing endpoint must be an HTTPS origin without embedded credentials")
+        _fail("pairing endpoint must be an origin without embedded credentials")
     if parsed.query or parsed.fragment:
         _fail("pairing endpoint must not contain a query string or fragment")
     path = parsed.path.rstrip("/")
-    endpoint_url = urlunsplit(("https", parsed.netloc, path, "", ""))
+    endpoint_url = urlunsplit((scheme, parsed.netloc, path, "", ""))
     websocket_path = f"{path}/api/ws" if path else "/api/ws"
-    websocket_url = urlunsplit(("wss", parsed.netloc, websocket_path, "", ""))
+    websocket_url = urlunsplit(("wss" if scheme == "https" else "ws", parsed.netloc, websocket_path, "", ""))
     return endpoint_url, websocket_url
 
 
@@ -657,7 +659,7 @@ def _pairing_payload(
             "sidecar_port": sidecar_port,
             "official_upstream_bind": BIND_HOST,
             "official_upstream_port": upstream_port,
-            "tls_terminated_by_ingress": True,
+            "tls_terminated_by_ingress": endpoint is not None and urlsplit(endpoint).scheme == "https",
         },
     }
 
@@ -759,7 +761,7 @@ def _existing_matches(
         return False
     if pairing.get("installation_id") != installation_id:
         return False
-    if endpoint is not None and pairing.get("endpoint") != _normalize_endpoint(endpoint)[0]:
+    if endpoint is not None and pairing.get("endpoint") != endpoint:
         return False
     expected_files = _expected_files(root, probe, upstream_port, sidecar_port)
     return all((root / relative).read_bytes() == content for relative, content in expected_files.items())
@@ -799,7 +801,10 @@ def _install(args: argparse.Namespace) -> dict[str, Any]:
     endpoint: str | None = None
     websocket: str | None = None
     if args.endpoint:
-        endpoint, websocket = _normalize_endpoint(args.endpoint)
+        endpoint, websocket = _normalize_endpoint(
+            args.endpoint,
+            allow_loopback_http=bool(getattr(args, "allow_loopback_http", False)),
+        )
 
     if manifest is not None and _existing_matches(
         root,
@@ -966,7 +971,10 @@ def _pair(args: argparse.Namespace) -> dict[str, Any]:
         _fail(f"mobile sidecar is not installed at {root}")
     manifest = _validate_installation(root)
     runtime = _read_json_verified(root / "runtime.json", label="runtime manifest")
-    endpoint, websocket = _normalize_endpoint(args.endpoint)
+    endpoint, websocket = _normalize_endpoint(
+        args.endpoint,
+        allow_loopback_http=bool(getattr(args, "allow_loopback_http", False)),
+    )
     external_token = _read_token_verified(root / "external.token", label="external token")
     existing = _read_json_verified(root / "pairing.json", label="pairing manifest")
     if existing.get("endpoint") == endpoint:
@@ -1051,6 +1059,18 @@ def _probe_command(args: argparse.Namespace) -> dict[str, Any]:
     return _probe_hermes(args.hermes, args.python)
 
 
+def _pairing_output(result: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    if not getattr(args, "show_pairing", False):
+        return result
+    if result.get("action") in {"would-install", "would-pair", "would-activate", "would-remove"}:
+        return result
+    root = Path(result.get("root") or _mobile_root())
+    pairing = _read_json_verified(root / "pairing.json", label="pairing manifest")
+    result["pairing_endpoint"] = pairing.get("endpoint")
+    result["pairing_secret"] = _read_token_verified(root / "external.token", label="external token")
+    return result
+
+
 def _emit(result: dict[str, Any], *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(result, sort_keys=True))
@@ -1091,6 +1111,14 @@ def _emit(result: dict[str, Any], *, as_json: bool) -> None:
             print(f"Pairing ready: {'yes' if result['pairing_ready'] else 'no'}")
     else:
         print(json.dumps(result, indent=2, sort_keys=True))
+    if "pairing_secret" in result:
+        endpoint = result.get("pairing_endpoint")
+        host_port = urlsplit(endpoint).netloc if isinstance(endpoint, str) else "not-configured"
+        print(f"Android App endpoint: {endpoint or 'not configured'}")
+        print(f"Android App endpoint host:port: {host_port}")
+        print(f"Android App pairing header: {TOKEN_HEADER}")
+        print(f"Android App pairing secret: {result['pairing_secret']}")
+        print("Treat the pairing secret as a password; transfer it only through a trusted encrypted channel.")
 
 
 def _add_runtime_options(parser: argparse.ArgumentParser) -> None:
@@ -1116,6 +1144,8 @@ def _parser() -> argparse.ArgumentParser:
     install.add_argument("--upstream-port", type=int, default=DEFAULT_UPSTREAM_PORT, choices=range(1024, 65536))
     install.add_argument("--sidecar-port", type=int, default=DEFAULT_SIDECAR_PORT, choices=range(1024, 65536))
     install.add_argument("--endpoint", help="HTTPS ingress URL placed in pairing.json")
+    install.add_argument("--allow-loopback-http", action="store_true", help="allow HTTP only for an explicit loopback endpoint")
+    install.add_argument("--show-pairing", action="store_true", help="print the endpoint and pairing secret after a real install")
     install.add_argument("--no-activate", action="store_true")
     install.add_argument("--dry-run", action="store_true")
     install.add_argument("--json", action="store_true")
@@ -1123,6 +1153,8 @@ def _parser() -> argparse.ArgumentParser:
 
     pair = subparsers.add_parser("pair", help="write the HTTPS/header/ticket pairing manifest")
     pair.add_argument("--endpoint", required=True)
+    pair.add_argument("--allow-loopback-http", action="store_true", help="allow HTTP only for an explicit loopback endpoint")
+    pair.add_argument("--show-pairing", action="store_true", help="print the endpoint and pairing secret after pairing")
     pair.add_argument("--dry-run", action="store_true")
     pair.add_argument("--json", action="store_true")
     pair.set_defaults(handler=_pair)
@@ -1146,8 +1178,12 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "upstream_port", None) == getattr(args, "sidecar_port", object()):
         print("error: upstream and sidecar ports must differ", file=sys.stderr)
         return 1
+    if getattr(args, "show_pairing", False) and getattr(args, "json", False):
+        print("error: --show-pairing cannot be combined with --json", file=sys.stderr)
+        return 1
     try:
         result = args.handler(args)
+        result = _pairing_output(result, args)
     except InstallError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

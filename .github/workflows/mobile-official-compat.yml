@@ -6,6 +6,7 @@ on:
     paths:
       - apps/mobile/**
       - tests/mobile/test_gateway_install.py
+      - tests/mobile/test_gateway_pairing_output.py
       - tests/mobile/test_gateway_sidecar.py
       - tests/mobile/test_gateway_static.py
       - tests/mobile/test_official_gateway_compat.py
@@ -15,6 +16,7 @@ on:
     paths:
       - apps/mobile/**
       - tests/mobile/test_gateway_install.py
+      - tests/mobile/test_gateway_pairing_output.py
       - tests/mobile/test_gateway_sidecar.py
       - tests/mobile/test_gateway_static.py
       - tests/mobile/test_official_gateway_compat.py
@@ -101,6 +103,7 @@ jobs:
           uv run --project .ci/official-hermes --no-sync \
             python -m pytest \
             tests/mobile/test_gateway_install.py \
+            tests/mobile/test_gateway_pairing_output.py \
             tests/mobile/test_gateway_sidecar.py \
             tests/mobile/test_gateway_static.py \
             tests/mobile/test_official_gateway_compat.py \

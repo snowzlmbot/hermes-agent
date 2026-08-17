@@ -90,6 +90,19 @@ final class AudioInteractionModelTests: XCTestCase {
         model.cancelRecording()
     }
 
+    func testCancelInvalidatesSuspendedStart() async {
+        let recorder = FakeRecordingService(startDelay: .milliseconds(50))
+        let model = AudioInteractionModel(recordingService: recorder, playbackService: FakePlaybackService())
+        let pendingStart = Task { await model.startRecording(using: FakeAudioClient()) { _ in } }
+        await Task.yield()
+        XCTAssertTrue(model.isStartingRecording)
+        model.cancelRecording()
+        _ = await pendingStart.value
+        XCTAssertFalse(model.isRecording)
+        XCTAssertNil(model.errorMessage)
+        XCTAssertGreaterThanOrEqual(recorder.cancelCallCount, 1)
+    }
+
     func testRecordingCannotRestartWhileTranscribing() async {
         let recorder = FakeRecordingService()
         let client = FakeAudioClient(transcriptionDelay: .milliseconds(50))
@@ -157,6 +170,7 @@ private final class FakeRecordingService: AudioRecordingServiceProtocol {
     private let stopError: Error?
     private(set) var startCallCount = 0
     private(set) var stopCallCount = 0
+    private(set) var cancelCallCount = 0
 
     init(
         startError: Error? = nil,
@@ -180,7 +194,7 @@ private final class FakeRecordingService: AudioRecordingServiceProtocol {
         return try AudioDataURL(mimeType: "audio/mp4", data: Data("audio".utf8))
     }
 
-    func cancel() {}
+    func cancel() { cancelCallCount += 1 }
 }
 
 @MainActor

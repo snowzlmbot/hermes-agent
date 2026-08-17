@@ -1,10 +1,15 @@
-# Hermes Mobile test builds
+# Hermes Mobile Beta 0.2.0
 
 The mobile clients connect through the independent Hermes Mobile sidecar in
 [`gateway/README.md`](./gateway/README.md). The sidecar is the only TLS-ingress
 target: it listens on `127.0.0.1:9120`, bridges to an unchanged official
 Hermes `v0.20.1` gateway on `127.0.0.1:9119`, and keeps the two credentials
 separate.
+
+Android安装与配对首先阅读：[`android/README.md`](./android/README.md)。
+Termux区别、Agent指令和网关安全细节见：
+[`gateway/README.md`](./gateway/README.md)。图示版见
+[`gateway/assets/android-pairing-flow.svg`](./gateway/assets/android-pairing-flow.svg)。
 
 ## Mobile authentication contract
 
@@ -29,51 +34,32 @@ the sidecar strips that header before forwarding and injects a distinct
 loopback-only credential for official Hermes. OAuth flows retain their own
 native ticket exchange and do not reuse the pairing credential in a URL.
 
-## Download the Android test build
+## 下载 Android Beta
 
-The stable build entry is the **Mobile Android** Actions page on the delivery
-branch:
+唯一面向用户的下载入口是 GitHub **Pre-release**：
 
-<https://github.com/snowzlmbot/hermes-agent/actions/workflows/mobile-android.yml?query=branch%3Ahermes-agent-Mobile-app>
+<https://github.com/snowzlmbot/hermes-agent/releases>
 
-1. Open the newest successful run whose branch is `hermes-agent-Mobile-app`.
-2. Record the run commit SHA.
-3. Download `hermes-mobile-android-<commit-sha>`.
-4. Use the Debug APK for test installation. The Release output is a
-   verification build and may be unsigned.
+选择最新的 `Hermes Mobile Beta`，下载：
 
-With GitHub CLI:
+- `hermes-mobile-android-beta.apk`
+- `SHA256SUMS.txt`
+- `android-pairing-flow.svg`（离线教程）
 
-```bash
-gh run list \
-  --repo snowzlmbot/hermes-agent \
-  --workflow mobile-android.yml \
-  --branch hermes-agent-Mobile-app \
-  --status success \
-  --limit 5
+不要从 Actions 下载或安装中间产物。Release 页面会标明专用分支commit SHA；APK与校验文件必须来自同一Beta Release。
 
-gh run download RUN_ID \
-  --repo snowzlmbot/hermes-agent \
-  --name hermes-mobile-android-COMMIT_SHA \
-  --dir hermes-mobile-android-COMMIT_SHA
-```
-
-Install only after verifying the run and artifact came from the expected
-commit:
+校验并安装：
 
 ```bash
-adb install -r path/to/app-debug.apk
+sha256sum -c SHA256SUMS.txt
+adb install -r hermes-mobile-android-beta.apk
 ```
 
-## iOS test output
+也可在Android设备上直接打开APK安装；系统提示“允许此来源”时只授权你用于下载Release的浏览器或文件管理器。Beta不是正式商店版本。
 
-The stable **Mobile iOS** Actions page is:
+## iOS Beta 状态
 
-<https://github.com/snowzlmbot/hermes-agent/actions/workflows/mobile.yml?query=branch%3Ahermes-agent-Mobile-app>
-
-Current artifacts contain simulator/unsigned verification output, not a
-signed App Store or physical-device distribution. Use the artifact whose name
-embeds the exact run commit SHA.
+当前Beta Release不附带可安装的iOS包。CI中的`.xcarchive`仅证明`iphoneos`设备构建可归档且未签名，不是IPA、TestFlight或真机安装包。完成签名、受保护导出和真实设备验收前，不向用户提供iOS下载资产。
 
 ## Official compatibility pin
 
